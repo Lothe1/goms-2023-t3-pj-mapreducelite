@@ -11,6 +11,7 @@ pub mod codec;
 pub mod standalone;
 pub mod utils;
 pub mod workload;
+pub mod cmd;
 
 /////////////////////////////////////////////////////////////////////////////
 // MapReduce application types
