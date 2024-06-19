@@ -2,7 +2,7 @@
 // use bytes::Bytes;
 use mrlite::*;
 use clap::Parser;
-use cmd::{Args, Commands};
+use cmd::ctl::{Args, Commands};
 use standalone::Job;
 
 fn main() {
