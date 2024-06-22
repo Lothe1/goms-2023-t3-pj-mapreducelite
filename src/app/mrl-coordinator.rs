@@ -20,8 +20,8 @@ use mapreduce::{WorkerRegistration, WorkerResponse, WorkerRequest, Task, JobRequ
     Only one coordinator !!
 */
 
-/// Only one job should be in either of the following states: `{MapPhase, Shuffle, ShufflePhase}``; 
-/// all other jobs should either be `Pending` or `Completed`.
+// Only one job should be in either of the following states: `{MapPhase, Shuffle, ShufflePhase}``; 
+// all other jobs should either be `Pending` or `Completed`.
 #[derive(Debug)]
 enum JobStatus {
     Pending,
@@ -31,17 +31,17 @@ enum JobStatus {
     Completed
 } 
 
-/// Struct for a Job, which holds the status of a job
-/// and the assigned `standalone::Job`.
+// Struct for a Job, which holds the status of a job
+// and the assigned `standalone::Job`.
 struct Job {
     status: JobStatus,
     job: standalone::Job,
 }
 
-/// The default state for a worker node is `Idle`, meaning no work is assigned but the worker is alive.
-/// 
-/// A worker node is `busy` if it is currently operating a task, and `dead` if it has not responded
-/// to a status check (heartbeat).
+// The default state for a worker node is `Idle`, meaning no work is assigned but the worker is alive.
+// 
+// A worker node is `busy` if it is currently operating a task, and `dead` if it has not responded
+// to a status check (heartbeat).
 #[derive(Debug)]
 enum WorkerState {
     Idle,
@@ -49,8 +49,8 @@ enum WorkerState {
     Dead
 }
 
-/// Struct for a worker, which holds the state of a worker
-/// and the IP address of the worker to send RPC for communication.
+// Struct for a worker, which holds the state of a worker
+// and the IP address of the worker to send RPC for communication.
 struct WorkerNode {
     state: WorkerState,
     addr: String
@@ -90,8 +90,8 @@ impl Coordinator for CoordinatorService {
         }))
     }
 
-    /// Get a task from the job queue
-    /// and return the task to the worker
+    // Get a task from the job queue
+    // and return the task to the worker
     async fn get_task(&self, _request: Request<WorkerRequest>) -> Result<Response<Task>, Status> {
         let job_option = self.job_queue.lock().unwrap().pop_front();
         match job_option {
