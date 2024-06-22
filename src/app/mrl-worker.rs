@@ -5,8 +5,8 @@ use clap::Parser;
 use cmd::worker::Args;
 
 fn main() {
-    print!("Hello worker!");
+    print!("Hello worker!\n");
     let args = Args::parse();
     let ip = args.join;
-    print!("{}", ip)
+    print!("IP to join: {}", ip)
 }

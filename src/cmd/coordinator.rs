@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -8,9 +8,4 @@ pub struct Args {
     /// [OPT] Specified port for coordinator to listen to
     #[clap(short, long, default_value = None, short = 'P')]
     pub port: Option<u128>
-}
-
-#[derive(Subcommand, Debug)]
-pub enum Commands {
-    
 }
