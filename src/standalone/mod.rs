@@ -31,6 +31,7 @@ pub enum Commands {
     },
 }
 
+#[derive(Debug, Clone)]
 pub struct Job {
     pub input: String,
     pub workload: String,
