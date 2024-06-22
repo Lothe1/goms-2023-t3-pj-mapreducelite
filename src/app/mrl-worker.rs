@@ -2,17 +2,11 @@
 // use bytes::Bytes;
 use mrlite::*;
 use clap::Parser;
-use cmd::worker::{Args, Commands};
+use cmd::worker::Args;
 
 fn main() {
     print!("Hello worker!");
     let args = Args::parse();
-    match args.command {
-        Commands::Join {
-            addr
-        } => {
-            // host the coordinatorrr
-            print!("Joining with coordinator @ {}!", addr);
-        }
-    }
+    let ip = args.join;
+    print!("{}", ip)
 }
