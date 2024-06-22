@@ -76,6 +76,8 @@ pub struct CoordinatorService {
 impl Coordinator for CoordinatorService {
 
     // Register a worker with the coordinator
+    // This function is called when a worker node wants to register itself with the coordinator. 
+    // When a worker starts up, it should send a registration request to the coordinator to announce its availability for task assignments
     async fn register_worker(&self, request: Request<WorkerRegistration>) -> Result<Response<WorkerResponse>, Status> {
         let worker = WorkerNode {
             state: WorkerState::Idle,
@@ -92,6 +94,8 @@ impl Coordinator for CoordinatorService {
 
     // Get a task from the job queue
     // and return the task to the worker
+    // This function is called by a worker node when it requests a task from the coordinator. 
+    // Once a worker is registered and ready to perform work, it will periodically request tasks from the coordinator to execute
     async fn get_task(&self, _request: Request<WorkerRequest>) -> Result<Response<Task>, Status> {
         let job_option = self.job_queue.lock().unwrap().pop_front();
         match job_option {
