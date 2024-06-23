@@ -5,6 +5,8 @@ use clap::{Parser, Subcommand};
 pub struct Args {
     #[clap(subcommand)]
     pub command: Commands,
+    #[clap(short, long, default_value = None, short = 'J')]
+    pub host: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -25,7 +27,7 @@ pub enum Commands {
 
         /// Auxiliary arguments to pass to the MapReduce application.
         #[clap(value_parser, last = true)]
-        args: Vec<String>,
+        args: Option<Vec<String>>,
     },
     /// Lists all jobs that have been submitted to the system and their statuses
     /// 

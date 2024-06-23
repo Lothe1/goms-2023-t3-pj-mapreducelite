@@ -1,6 +1,7 @@
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use tonic::transport::Channel;
 use tonic::Request;
+use mrlite::cmd::ctl::{Args, Commands};
 
 mod mapreduce {
     tonic::include_proto!("mapreduce");
@@ -9,34 +10,18 @@ mod mapreduce {
 use mapreduce::coordinator_client::CoordinatorClient;
 use mapreduce::{JobRequest, Empty, Status as SystemStatus};
 
-#[derive(Parser)]
-struct Args {
-    #[clap(subcommand)]
-    command: Commands,
-    #[clap(long)]
-    coordinator: String,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    Submit {
-        input: String,
-        workload: String,
-        output: String,
-    },
-    Jobs,
-    Status,
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let coordinator_address = args.coordinator;
+    let host = match args.host {
+        Some(h) => h,
+        None => format!("127.0.0.1:50051") // If the host is not specified, assume read from config file na kub (future)
+    };
 
-    let mut client = CoordinatorClient::connect(format!("http://{}", coordinator_address)).await?;
+    let mut client = CoordinatorClient::connect(format!("http://{}", host)).await?;
 
     match args.command {
-        Commands::Submit { input, workload, output } => {
+        Commands::Submit { input, workload, output , args} => {
             let request = Request::new(JobRequest {
                 input,
                 workload,
@@ -47,11 +32,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let response = client.submit_job(request).await?;
             println!("Submitted job: {:?}", response);
         },
-        Commands::Jobs => {
+        Commands::Jobs {} => {
             let response = client.list_jobs(Request::new(Empty {})).await?;
             println!("Job list: {:?}", response);
         },
-        Commands::Status => {
+        Commands::Status {} => {
             let response = client.system_status(Request::new(Empty {})).await?;
             println!("System status: {:?}", response);
             
