@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 // use anyhow::*;
 // use bytes::Bytes;
@@ -62,6 +62,21 @@ impl Default for CoordinatorService {
         Self {
             job_queue: Arc::new(Mutex::new(VecDeque::new())),
             workers: Arc::new(Mutex::new(Vec::new())),
+            os_ip: "".into(),
+            os_user: "".into(),
+            os_pw: "".into(),
+        }
+    }
+}
+
+impl CoordinatorService {
+    fn new(ip: impl ToString, user: impl ToString, pw: impl ToString) -> Self {
+        Self {
+            job_queue: Arc::new(Mutex::new(VecDeque::new())),
+            workers: Arc::new(Mutex::new(Vec::new())),
+            os_ip: ip.to_string(),
+            os_user: user.to_string(),
+            os_pw: pw.to_string(),
         }
     }
 }
@@ -69,7 +84,10 @@ impl Default for CoordinatorService {
 // Struct for the coordinator, which holds the job queue and the worker list.
 pub struct CoordinatorService {
     job_queue: Arc<Mutex<VecDeque<Job>>>,
-    workers: Arc<Mutex<Vec<WorkerNode>>>
+    workers: Arc<Mutex<Vec<WorkerNode>>>,
+    os_ip: String,
+    os_user: String,
+    os_pw: String
 }
 
 #[tonic::async_trait]
@@ -85,11 +103,15 @@ impl Coordinator for CoordinatorService {
         };
         println!("New worker joined at {:?}", worker.addr.to_string());
         let s3_service = format!("http://localhost:9000");
-
+        let mut args: HashMap<String, String> = HashMap::new();
+        args.insert("ip".into(), self.os_ip.clone());
+        args.insert("user".into(), self.os_user.clone());
+        args.insert("pw".into(), self.os_pw.clone());
         self.workers.lock().unwrap().push(worker);
         Ok(Response::new(WorkerResponse {
             success: true,
-            message: s3_service,
+            message: "Worker registered".into(),
+            args: args,
         }))
     }
 
@@ -178,9 +200,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(p) => p,
         None => 50051,
     };
+    let os_ip: String = match args.os {
+        Some(ip) => ip,
+        None => "127.0.0.1:9000".into()
+    };
+    let os_user: String = match args.user {
+        Some(user) => user,
+        None => "ROOTNAME".into()
+    };
+    let os_pw: String = match args.pw {
+        Some(pw) => pw,
+        None => "CHANGEME123".into()
+    };
     let addr = format!("127.0.0.1:{port}").parse().unwrap();
-    let coordinator = CoordinatorService::default();
-
+    let coordinator = CoordinatorService::new(os_ip, os_user, os_pw);
     println!("Coordinator listening on {}", addr);
 
     // Start a new the gRPC server
