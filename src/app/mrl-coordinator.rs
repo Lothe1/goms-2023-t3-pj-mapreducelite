@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::net::SocketAddr;
 // use anyhow::*;
 // use bytes::Bytes;
 use mrlite::*;
@@ -53,7 +54,7 @@ enum WorkerState {
 // and the IP address of the worker to send RPC for communication.
 struct WorkerNode {
     state: WorkerState,
-    addr: String
+    addr: SocketAddr,
 }
 
 // Implement the default trait for the CoordinatorService struct
@@ -81,11 +82,10 @@ impl Coordinator for CoordinatorService {
     async fn register_worker(&self, request: Request<WorkerRegistration>) -> Result<Response<WorkerResponse>, Status> {
         let worker = WorkerNode {
             state: WorkerState::Idle,
-            addr: request.into_inner().address,
+            addr: request.remote_addr().unwrap(),
         };
-
+        println!("New worker joined at {:?}", worker.addr.to_string());
         self.workers.lock().unwrap().push(worker);
-
         Ok(Response::new(WorkerResponse {
             success: true,
             message: "Worker registered".into(),
@@ -157,7 +157,7 @@ impl Coordinator for CoordinatorService {
     async fn system_status(&self, _request: Request<Empty>) -> Result<Response<SystemStatus>, Status> {
         let workers = self.workers.lock().unwrap();
         let worker_list: Vec<Worker> = workers.iter().map(|worker| Worker {
-            address: worker.addr.clone(),
+            address: worker.addr.to_string().clone(),
             state: format!("{:?}", worker.state),
         }).collect();
 
