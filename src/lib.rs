@@ -12,6 +12,7 @@ pub mod standalone;
 pub mod utils;
 pub mod workload;
 pub mod cmd;
+pub mod S3;
 
 /////////////////////////////////////////////////////////////////////////////
 // MapReduce application types

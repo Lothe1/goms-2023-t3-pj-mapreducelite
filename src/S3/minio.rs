@@ -3,8 +3,7 @@ use aws_sdk_s3 as s3;
 use s3::Client;
 use std::error::Error;
 use aws_sdk_s3::config::Credentials;
-use aws_types::region::Region;
-
+use aws_config::Region;
 
 pub async fn get_min_io_client(base_url: String) -> Result<Client, Box<dyn Error>> {
     // MinIO Server config

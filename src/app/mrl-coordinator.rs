@@ -16,7 +16,6 @@ mod mapreduce {
 use mapreduce::coordinator_server::{Coordinator, CoordinatorServer};
 use mapreduce::{WorkerRegistration, WorkerResponse, WorkerRequest, Task, JobRequest, JobResponse, Empty, JobList, Status as SystemStatus, Worker};
 
-
 /* 
     Only one coordinator !!
 */
@@ -85,10 +84,12 @@ impl Coordinator for CoordinatorService {
             addr: request.remote_addr().unwrap(),
         };
         println!("New worker joined at {:?}", worker.addr.to_string());
+        let s3_service = format!("http://localhost:9000");
+
         self.workers.lock().unwrap().push(worker);
         Ok(Response::new(WorkerResponse {
             success: true,
-            message: "Worker registered".into(),
+            message: s3_service,
         }))
     }
 
@@ -191,18 +192,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-
-// #[tokio::main]
-// async fn main() {
-//     print!("Hello coordinator!\n");
-//     let args = Args::parse();
-//     let port: Option<u128> = args.port;
-//     // Check for port !!
-//     print!("Port to listen to: {:?}\n", port);
-//     // There are no required arguments (yet)
-
-//     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
-//     println!("Listening!");
-//     let jobQueue: VecDeque<Job> = VecDeque::new();
-
-// }

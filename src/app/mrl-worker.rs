@@ -4,8 +4,11 @@ use anyhow::Ok;
 use mrlite::*;
 use clap::Parser;
 use cmd::worker::Args;
-use tonic::Request;
+use tokio::time::sleep;
+use tonic::{Request, Response};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use S3::minio;
 
 mod mapreduce {
     tonic::include_proto!("mapreduce");
@@ -22,7 +25,14 @@ async fn main() {
     print!("IP to join: {}", ip);
     let mut client = CoordinatorClient::connect(format!("http://{}", ip)).await.unwrap();
 
-    let request: Request<WorkerRegistration> = Request::new(WorkerRegistration { address: format!("") });
-    let response = client.register_worker(request).await.unwrap();
-    println!("{:?}", response)
+    let join_resp = client.register_worker(Request::new(WorkerRegistration { address: format!("") })).await.unwrap();
+    // println!("{:?}", join_resp);
+    let s3_client = minio::get_min_io_client(join_resp.into_inner().message).await.unwrap();
+
+    loop {
+        let resp = client.get_task(Request::new(WorkerRequest {  })).await;
+        if resp.is_err() {
+            sleep(Duration::from_secs(1)).await;
+        }
+    }
 }
