@@ -10,13 +10,12 @@ service Coordinator {
   rpc SystemStatus(Empty) returns (Status);
 }
 
-message WorkerRegistration {
-  string address = 1;
-}
+message WorkerRegistration {}
 
 message WorkerResponse {
   bool success = 1;
   string message = 2;
+  map<string, string> args = 3;
 }
 
 message WorkerRequest {}
