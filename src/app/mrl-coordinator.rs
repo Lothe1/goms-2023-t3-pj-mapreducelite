@@ -102,7 +102,6 @@ impl Coordinator for CoordinatorService {
             addr: request.remote_addr().unwrap(),
         };
         println!("New worker joined at {:?}", worker.addr.to_string());
-        let s3_service = format!("http://localhost:9000");
         let mut args: HashMap<String, String> = HashMap::new();
         args.insert("ip".into(), self.os_ip.clone());
         args.insert("user".into(), self.os_user.clone());
@@ -202,7 +201,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let os_ip: String = match args.os {
         Some(ip) => ip,
-        None => "127.0.0.1:9000".into()
+        None => "localhost:9000".into()
     };
     let os_user: String = match args.user {
         Some(user) => user,

@@ -5,17 +5,17 @@ use std::error::Error;
 use aws_sdk_s3::config::Credentials;
 use aws_config::Region;
 
-pub async fn get_min_io_client(base_url: String) -> Result<Client, Box<dyn Error>> {
+pub async fn get_min_io_client(base_url: String, access_id: String, access_key: String) -> Result<Client, Box<dyn Error>> {
     // MinIO Server config
     // let base_url = "http://localhost:9000";
-    let access_key_id = "ROOTNAME";
-    let secret_access_key = "CHANGEME123";
+    // let access_key_id = "ROOTNAME";
+    // let secret_access_key = "CHANGEME123";
 
-    let region = Region::new("us-west-2");
+    let region = Region::new("us-east-1");
     let credentials =
         Credentials::new(
-            access_key_id,
-            secret_access_key,
+            access_id,
+            access_key,
             None,
             None,
             "loaded-from-custom-env");
