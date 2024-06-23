@@ -1,9 +1,10 @@
 use std::collections::VecDeque;
+use std::fmt::format;
 // use anyhow::*;
 // use bytes::Bytes;
 use mrlite::*;
-// use clap::Parser;
-// use cmd::coordinator::Args;
+use clap::Parser;
+use cmd::coordinator::Args;
 // use tokio::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use tonic::{transport::Server, Request, Response, Status};
@@ -172,7 +173,12 @@ impl Coordinator for CoordinatorService {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!("Hello coordinator!\n");
-    let addr = "127.0.0.1:50051".parse().unwrap();
+    let args = Args::parse();
+    let port: u128 = match args.port {
+        Some(p) => p,
+        None => 50051,
+    };
+    let addr = format!("127.0.0.1:{port}").parse().unwrap();
     let coordinator = CoordinatorService::default();
 
     println!("Coordinator listening on {}", addr);
