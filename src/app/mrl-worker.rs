@@ -58,11 +58,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
 
     // println!("bucket accessible: {}", minio::is_bucket_accessible(s3_client.clone(), bucket_name.to_string()).await.unwrap());
 
+    //Get object
     let bucket_name = "rust-s3";
     let object_name = "/input/text2.txt";
-    match minio::get_object(s3_client, bucket_name.to_string(), object_name.to_string()).await {
+    match minio::get_object(&s3_client, bucket_name, object_name).await {
         Ok(content) => println!("{:?}", content),
         Err(e) => eprintln!("Failed to get object: {:?}", e),
+    }
+
+    // //Write object
+    // match minio::upload_string(&s3_client, bucket_name, "write_test", "Mother wouldst Thou truly Lordship sanction\n in one so bereft of light?").await {
+    //     Ok(_) => println!("Uploaded"),
+    //     Err(e) => eprintln!("Failed to upload: {:?}", e),
+    // }
+
+    //Delete object s3 doesnt return error for some reason lol
+    match minio::delete_object(&s3_client, bucket_name, "write_test").await {
+        Ok(_) => println!("Deleted"),
+        Err(e) => eprintln!("Failed to delete: {:?}", e),
     }
 
     loop {
