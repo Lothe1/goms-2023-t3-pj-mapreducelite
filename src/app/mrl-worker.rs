@@ -40,7 +40,7 @@ async fn main() {
 
     let bucket_name = "rust-s3";
     let object_name = "/input/text2.txt";
-    match minio::get_object(s3_client, bucket_name.to_string(), object_name.to_string()).await {
+    match minio::get_object(s3_client, bucket_name, object_name).await {
         Ok(content) => println!("{:?}", content),
         Err(e) => eprintln!("Failed to get object: {:?}", e),
     }

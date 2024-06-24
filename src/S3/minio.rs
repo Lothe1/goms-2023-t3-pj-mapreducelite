@@ -9,6 +9,7 @@ use std::{fs::File, io::Write, path::PathBuf, process::exit};
 
 use aws_sdk_s3::Client;
 use aws_sdk_s3::types::Bucket;
+use aws_sdk_s3::types::ReplicationStatus::Failed;
 use clap::Parser;
 use tracing::trace;
 
@@ -44,7 +45,7 @@ pub async fn get_min_io_client(base_url: String, access_id: String, access_key: 
 }
 
 // Get object as String for now for test purposes
-pub async fn get_object(client: Client, bucket: String, object:String) -> Result<String, anyhow::Error> {
+pub async fn get_object(client: Client, bucket: &str, object: &str) -> Result<String, anyhow::Error> {
     //Bucket is the name of the bucket, object is the name of the object
     trace!("bucket:      {}", bucket);
     trace!("object:      {}", object);
@@ -67,21 +68,64 @@ pub async fn get_object(client: Client, bucket: String, object:String) -> Result
 //If wanna use this in main just
 // let bucket_name = "rust-s3";
 // let object_name = "/input/text2.txt";
-// match minio::get_object(s3_client, bucket_name.to_string(), object_name.to_string()).await {
+// match minio::get_object(s3_client, bucket_name, object_name).await {
 // Ok(content) => println!("{:?}", content),
 // Err(e) => eprintln!("Failed to get object: {:?}", e),
 // }
 
+pub async fn create_directory(client: &Client, bucket: &str, directory: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let directory_key = format!("{}/", directory);
 
-pub async fn is_bucket_accessible(client: Client, bucket_name: String) -> Result<bool, anyhow::Error>{
+    let put_request = client.put_object()
+        .bucket(bucket)
+        .key(directory_key)
+        .body(Vec::new().into());
+
+    put_request.send().await?;
+
+    Ok(())
+}
+
+pub async fn object_exists(client: &Client, bucket: &str, object: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    match client.head_object().bucket(bucket).key(object).send().await {
+        Ok(_) => Ok(true),
+        Err(_) => Ok(false),
+    }
+}
+
+pub async fn is_bucket_accessible(client: &Client, bucket_name: String) -> Result<bool, anyhow::Error>{
     match client.head_bucket().bucket(bucket_name).send().await {
         Ok(_) => Ok(true),
         Err(e) => Err(e.into()),
     }
 }
 
+pub async fn get_bucket_list(client: &Client)-> Result<(Vec<String>), Box<dyn Error>> {
+    let resp = client.list_buckets().send().await?;
+    let mut res = Vec::new();
+    for bucket in resp.buckets.unwrap_or_default() {
+        res.push(bucket.name.unwrap_or_default());
+    }
+    Ok(res)
+}
 
+pub async fn initialize_bucket_directories(client: &Client) -> Result<(), Box<dyn Error>>{
+    let temp = get_bucket_list(client).await?;
+    if !temp.contains(&"mrl-lite".to_string()){
+        client.create_bucket().bucket("mrl-lite").send().await?;
+    }
+    if (object_exists(client, "mrl-lite", "/input/").await? ==  false){
+        create_directory(client, "mrl-lite", "/input/").await?;
+    }
+    if (object_exists(client, "mrl-lite", "/output/").await? == false){
+        create_directory(client, "mrl-lite", "/output/").await?;
+    }
+    if (object_exists(client, "mrl-lite", "/temp/").await? == false){
+        create_directory(client, "mrl-lite", "/temp/").await?;
+    }
+    Ok(())
 
+}
 
 // Example of listing file buckets
 //

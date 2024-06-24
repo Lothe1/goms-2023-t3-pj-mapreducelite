@@ -15,6 +15,8 @@ mod mapreduce {
 
 use mapreduce::coordinator_server::{Coordinator, CoordinatorServer};
 use mapreduce::{WorkerRegistration, WorkerResponse, WorkerRequest, Task, JobRequest, JobResponse, Empty, JobList, Status as SystemStatus, Worker};
+use mrlite::S3::minio;
+use mrlite::S3::minio::initialize_bucket_directories;
 
 /* 
     Only one coordinator !!
@@ -212,8 +214,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => "CHANGEME123".into()
     };
     let addr = format!("127.0.0.1:{port}").parse().unwrap();
-    let coordinator = CoordinatorService::new(os_ip, os_user, os_pw);
+    let coordinator = CoordinatorService::new(os_ip.clone(), os_user.clone(), os_pw.clone());
     println!("Coordinator listening on {}", addr);
+
+    // Create a bucket for the coordinator, and the subdirectores if not exist
+    let client = minio::get_min_io_client(os_ip.clone(), os_user.clone(), os_pw.clone()).await.unwrap();
+    initialize_bucket_directories(&client).await.unwrap();
 
     // Start a new the gRPC server
     // and add the coordinator service to the server
