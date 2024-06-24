@@ -1,3 +1,4 @@
+#![ allow(warnings)]
 use clap::Parser;
 use tonic::transport::Channel;
 use tonic::Request;

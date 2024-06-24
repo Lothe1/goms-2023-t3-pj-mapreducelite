@@ -1,9 +1,19 @@
+#![allow(warnings)]
 use aws_config::from_env;
 use aws_sdk_s3 as s3;
-use s3::Client;
 use std::error::Error;
 use aws_sdk_s3::config::Credentials;
 use aws_config::Region;
+
+use std::{fs::File, io::Write, path::PathBuf, process::exit};
+
+use aws_sdk_s3::Client;
+use aws_sdk_s3::types::Bucket;
+use clap::Parser;
+use tracing::trace;
+
+
+
 
 pub async fn get_min_io_client(base_url: String, access_id: String, access_key: String) -> Result<Client, Box<dyn Error>> {
     // MinIO Server config
@@ -23,7 +33,8 @@ pub async fn get_min_io_client(base_url: String, access_id: String, access_key: 
     let config_loader = from_env()
         .region(region)
         .credentials_provider(credentials)
-        .endpoint_url(base_url)
+        .endpoint_url("http://127.0.0.1:9000")
+        .behavior_version(s3::config::BehaviorVersion::latest())
         .load().await;
 
 
@@ -31,6 +42,45 @@ pub async fn get_min_io_client(base_url: String, access_id: String, access_key: 
     let s3_client = Client::new(&config_loader);
     Ok(s3_client)
 }
+
+// Get object as String for now for test purposes
+pub async fn get_object(client: Client, bucket: String, object:String) -> Result<String, anyhow::Error> {
+    //Bucket is the name of the bucket, object is the name of the object
+    trace!("bucket:      {}", bucket);
+    trace!("object:      {}", object);
+    // trace!("destination: {}", opt.destination.display());
+    let mut object = client
+        .get_object()
+        .bucket(bucket)
+        .key(object)
+        .send()
+        .await?;
+
+    let mut content = Vec::new();
+
+    while let Some(bytes) = object.body.try_next().await? {
+        content.extend_from_slice(&bytes);
+    }
+    let content_str = String::from_utf8(content)?;
+    Ok(content_str)
+}
+//If wanna use this in main just
+// let bucket_name = "rust-s3";
+// let object_name = "/input/text2.txt";
+// match minio::get_object(s3_client, bucket_name.to_string(), object_name.to_string()).await {
+// Ok(content) => println!("{:?}", content),
+// Err(e) => eprintln!("Failed to get object: {:?}", e),
+// }
+
+
+pub async fn is_bucket_accessible(client: Client, bucket_name: String) -> Result<bool, anyhow::Error>{
+    match client.head_bucket().bucket(bucket_name).send().await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
+}
+
+
 
 
 // Example of listing file buckets

@@ -1,5 +1,6 @@
 // use anyhow::*;
 // use bytes::Bytes;
+#![ allow(warnings)]
 use mrlite::*;
 use clap::Parser;
 use cmd::worker::Args;
@@ -7,6 +8,7 @@ use tokio::time::sleep;
 use tonic::{Request, Response};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use aws_sdk_s3::Client;
 use S3::minio;
 
 mod mapreduce {
@@ -30,12 +32,17 @@ async fn main() {
     let s3_ip = format!("http://{}", s3_args.args.get("ip").unwrap().clone());
     let s3_user = s3_args.args.get("user").unwrap().clone();
     let s3_pw = s3_args.args.get("pw").unwrap().clone();
-    // println!("{} {} {}\n", s3_ip, s3_user, s3_pw);
+    // println!("s3: {} {} {}\n", s3_ip, s3_user, s3_pw);
     let s3_client = minio::get_min_io_client(s3_ip, s3_user, s3_pw).await.unwrap();
     let resp = s3_client.list_buckets().send().await.unwrap();
 
-    for bucket in resp.buckets.unwrap_or_default() {
-        println!("{:?}", bucket.name.unwrap());
+    // println!("bucket accessible: {}", minio::is_bucket_accessible(s3_client.clone(), bucket_name.to_string()).await.unwrap());
+
+    let bucket_name = "rust-s3";
+    let object_name = "/input/text2.txt";
+    match minio::get_object(s3_client, bucket_name.to_string(), object_name.to_string()).await {
+        Ok(content) => println!("{:?}", content),
+        Err(e) => eprintln!("Failed to get object: {:?}", e),
     }
 
     loop {
@@ -45,3 +52,4 @@ async fn main() {
         }
     }
 }
+
