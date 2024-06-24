@@ -45,7 +45,7 @@ pub async fn get_min_io_client(base_url: String, access_id: String, access_key: 
 }
 
 // Get object as String for now for test purposes
-pub async fn get_object(client: Client, bucket: &str, object: &str) -> Result<String, anyhow::Error> {
+pub async fn get_object(client: &Client, bucket: &str, object: &str) -> Result<String, anyhow::Error> {
     //Bucket is the name of the bucket, object is the name of the object
     trace!("bucket:      {}", bucket);
     trace!("object:      {}", object);
@@ -85,21 +85,18 @@ pub async fn create_directory(client: &Client, bucket: &str, directory: &str) ->
 
     Ok(())
 }
-
 pub async fn object_exists(client: &Client, bucket: &str, object: &str) -> Result<bool, Box<dyn std::error::Error>> {
     match client.head_object().bucket(bucket).key(object).send().await {
         Ok(_) => Ok(true),
         Err(_) => Ok(false),
     }
 }
-
 pub async fn is_bucket_accessible(client: &Client, bucket_name: String) -> Result<bool, anyhow::Error>{
     match client.head_bucket().bucket(bucket_name).send().await {
         Ok(_) => Ok(true),
         Err(e) => Err(e.into()),
     }
 }
-
 pub async fn get_bucket_list(client: &Client)-> Result<(Vec<String>), Box<dyn Error>> {
     let resp = client.list_buckets().send().await?;
     let mut res = Vec::new();
@@ -108,7 +105,6 @@ pub async fn get_bucket_list(client: &Client)-> Result<(Vec<String>), Box<dyn Er
     }
     Ok(res)
 }
-
 pub async fn initialize_bucket_directories(client: &Client) -> Result<(), Box<dyn Error>>{
     let temp = get_bucket_list(client).await?;
     if !temp.contains(&"mrl-lite".to_string()){
@@ -126,6 +122,18 @@ pub async fn initialize_bucket_directories(client: &Client) -> Result<(), Box<dy
     Ok(())
 
 }
+
+pub async fn upload_string(client: &Client, bucket: &str, file_name: &str, content: &str) -> Result<(), Box<dyn std::error::Error> > {
+    let put_request = client.put_object()
+        .bucket(bucket)
+        .key(file_name)
+        .body(content.as_bytes().to_vec().into());
+    put_request.send().await?;
+    Ok(())
+}
+
+
+
 
 // Example of listing file buckets
 //
