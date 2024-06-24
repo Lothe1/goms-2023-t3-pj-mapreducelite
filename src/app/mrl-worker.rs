@@ -8,6 +8,8 @@ use tokio::time::sleep;
 use tonic::{Request, Response};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+// use std::io::{BufReader, Read};
+// use aws_sdk_s3::config::{Credentials, Config, Region, endpoint};
 use aws_sdk_s3::Client;
 use S3::minio;
 
@@ -44,21 +46,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
     // Register with coordinator
     let request = Request::new(WorkerRegistration { });
     let response = client.register_worker(request).await?;
-    println!("Worker registered: {:?}", response);
+    println!("Worker registered: {:?} \n", response);
 
+    // Get S3 args
     let s3_args = response.into_inner();
     let s3_ip = format!("http://{}", s3_args.args.get("ip").unwrap().clone());
     let s3_user = s3_args.args.get("user").unwrap().clone();
     let s3_pw = s3_args.args.get("pw").unwrap().clone();
-    // println!("s3: {} {} {}\n", s3_ip, s3_user, s3_pw);
+    println!("s3: {} {} {}\n", s3_ip, s3_user, s3_pw);
 
     // Initialize S3 client
-    let s3_client = minio::get_min_io_client(s3_ip.clone(), s3_user.clone(), s3_pw.clone()).await?;
-    let resp = s3_client.list_buckets().send().await.unwrap();
-
+    let s3_client = minio::get_min_io_client(s3_ip.clone(), s3_user.clone(), s3_pw.clone()).await?;  
+    let resp = match s3_client.list_buckets().send().await {
+        Ok(resp) =>  println!("{:?}", resp),
+        Err(e) => eprintln!("Failed to list buckets: {:?}", e),
+    };  
     // println!("bucket accessible: {}", minio::is_bucket_accessible(s3_client.clone(), bucket_name.to_string()).await.unwrap());
 
-    //Get object
+    // Get object
     let bucket_name = "rust-s3";
     let object_name = "/input/text2.txt";
     match minio::get_object(&s3_client, bucket_name, object_name).await {
@@ -78,6 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
         Err(e) => eprintln!("Failed to delete: {:?}", e),
     }
 
+    // Listen for tasks
     loop {
         let resp = client.get_task(Request::new(WorkerRequest {  })).await;
         if resp.is_err() {
@@ -85,4 +91,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
         }
     }
 }
-
