@@ -16,62 +16,6 @@ use tracing::trace;
 
 
 
-pub async fn get_min_io_client(base_url: String, access_id: String, access_key: String) -> Result<Client, Box<dyn Error>> {
-    // MinIO Server config
-    // let base_url = "http://localhost:9000";
-    // let access_key_id = "ROOTNAME";
-    // let secret_access_key = "CHANGEME123";
-
-    let region = Region::new("us-east-1");
-    let credentials =
-        Credentials::new(
-            access_id,
-            access_key,
-            None,
-            None,
-            "loaded-from-custom-env");
-
-    let config_loader = from_env()
-        .region(region)
-        .credentials_provider(credentials)
-        .endpoint_url("http://127.0.0.1:9000")
-        .behavior_version(s3::config::BehaviorVersion::latest())
-        .load().await;
-
-
-    // Create an S3 client
-    let s3_client = Client::new(&config_loader);
-    Ok(s3_client)
-}
-
-// Get object as String for now for test purposes
-pub async fn get_object(client: &Client, bucket: &str, object: &str) -> Result<String, anyhow::Error> {
-    //Bucket is the name of the bucket, object is the name of the object
-    trace!("bucket:      {}", bucket);
-    trace!("object:      {}", object);
-    // trace!("destination: {}", opt.destination.display());
-    let mut object = client
-        .get_object()
-        .bucket(bucket)
-        .key(object)
-        .send()
-        .await?;
-
-    let mut content = Vec::new();
-
-    while let Some(bytes) = object.body.try_next().await? {
-        content.extend_from_slice(&bytes);
-    }
-    let content_str = String::from_utf8(content)?;
-    Ok(content_str)
-}
-//If wanna use this in main just
-// let bucket_name = "rust-s3";
-// let object_name = "/input/text2.txt";
-// match minio::get_object(s3_client, bucket_name, object_name).await {
-// Ok(content) => println!("{:?}", content),
-// Err(e) => eprintln!("Failed to get object: {:?}", e),
-// }
 
 pub async fn create_directory(client: &Client, bucket: &str, directory: &str) -> Result<(), Box<dyn std::error::Error>> {
     let directory_key = format!("{}/", directory);
@@ -123,6 +67,36 @@ pub async fn initialize_bucket_directories(client: &Client) -> Result<(), Box<dy
 
 }
 
+
+// USEFUL STUFF THAT YOU GUYS PROBABLY USE
+pub async fn get_min_io_client(base_url: String, access_id: String, access_key: String) -> Result<Client, Box<dyn Error>> {
+    // MinIO Server config
+    // let base_url = "http://localhost:9000";
+    // let access_key_id = "ROOTNAME";
+    // let secret_access_key = "CHANGEME123";
+
+    let region = Region::new("us-east-1");
+    let credentials =
+        Credentials::new(
+            access_id,
+            access_key,
+            None,
+            None,
+            "loaded-from-custom-env");
+
+    let config_loader = from_env()
+        .region(region)
+        .credentials_provider(credentials)
+        .endpoint_url("http://127.0.0.1:9000")
+        .behavior_version(s3::config::BehaviorVersion::latest())
+        .load().await;
+
+
+    // Create an S3 client
+    let s3_client = Client::new(&config_loader);
+    Ok(s3_client)
+}
+
 pub async fn upload_string(client: &Client, bucket: &str, file_name: &str, content: &str) -> Result<(), Box<dyn std::error::Error> > {
     let put_request = client.put_object()
         .bucket(bucket)
@@ -131,6 +105,43 @@ pub async fn upload_string(client: &Client, bucket: &str, file_name: &str, conte
     put_request.send().await?;
     Ok(())
 }
+// Get object as String for now for test purposes
+pub async fn get_object(client: &Client, bucket: &str, object: &str) -> Result<String, anyhow::Error> {
+    //Bucket is the name of the bucket, object is the name of the object
+    trace!("bucket:      {}", bucket);
+    trace!("object:      {}", object);
+    // trace!("destination: {}", opt.destination.display());
+    let mut object = client
+        .get_object()
+        .bucket(bucket)
+        .key(object)
+        .send()
+        .await?;
+
+    let mut content = Vec::new();
+
+    while let Some(bytes) = object.body.try_next().await? {
+        content.extend_from_slice(&bytes);
+    }
+    let content_str = String::from_utf8(content)?;
+    Ok(content_str)
+}
+//If wanna use this in main just
+// let bucket_name = "rust-s3";
+// let object_name = "/input/text2.txt";
+// match minio::get_object(s3_client, bucket_name, object_name).await {
+// Ok(content) => println!("{:?}", content),
+// Err(e) => eprintln!("Failed to get object: {:?}", e),
+// }
+pub async fn delete_object(client: &Client, bucket: &str, object: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let delete_request = client.delete_object()
+        .bucket(bucket)
+        .key(object);
+    delete_request.send().await?;
+    Ok(())
+}
+
+
 
 
 

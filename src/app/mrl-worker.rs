@@ -46,10 +46,16 @@ async fn main() {
         Err(e) => eprintln!("Failed to get object: {:?}", e),
     }
 
-    //Write object
-    match minio::upload_string(&s3_client, bucket_name, "write_test", "Mother wouldst Thou truly Lordship sanction\n in one so bereft of light?").await {
-        Ok(_) => println!("Uploaded"),
-        Err(e) => eprintln!("Failed to upload: {:?}", e),
+    // //Write object
+    // match minio::upload_string(&s3_client, bucket_name, "write_test", "Mother wouldst Thou truly Lordship sanction\n in one so bereft of light?").await {
+    //     Ok(_) => println!("Uploaded"),
+    //     Err(e) => eprintln!("Failed to upload: {:?}", e),
+    // }
+
+    //Delete object s3 doesnt return error for some reason lol
+    match minio::delete_object(&s3_client, bucket_name, "write_test").await {
+        Ok(_) => println!("Deleted"),
+        Err(e) => eprintln!("Failed to delete: {:?}", e),
     }
 
     loop {
