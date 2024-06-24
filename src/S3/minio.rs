@@ -96,7 +96,6 @@ pub async fn get_min_io_client(base_url: String, access_id: String, access_key: 
     let s3_client = Client::new(&config_loader);
     Ok(s3_client)
 }
-
 pub async fn upload_string(client: &Client, bucket: &str, file_name: &str, content: &str) -> Result<(), Box<dyn std::error::Error> > {
     let put_request = client.put_object()
         .bucket(bucket)
@@ -142,6 +141,15 @@ pub async fn delete_object(client: &Client, bucket: &str, object: &str) -> Resul
 }
 
 
+//havent check yet
+pub async fn list_files_with_prefix(client: &Client, bucket: &str, prefix: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut objects = Vec::new();
+    let resp = client.list_objects_v2().bucket(bucket).prefix(prefix).send().await?;
+    for object in resp.contents.unwrap_or_default() {
+        objects.push(object.key.unwrap_or_default());
+    }
+    Ok(objects)
+}
 
 
 
