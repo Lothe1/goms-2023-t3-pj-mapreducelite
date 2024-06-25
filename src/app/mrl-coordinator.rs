@@ -27,7 +27,7 @@ use mrlite::S3::minio::*;
 
 // Only one job should be in either of the following states: `{MapPhase, Shuffle, ShufflePhase}``; 
 // all other jobs should either be `Pending` or `Completed`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum JobStatus {
     Pending,
     MapPhase,
@@ -87,6 +87,15 @@ pub struct CoordinatorService {
     os_user: String,
     os_pw: String,
     s3_client: Client
+}
+
+fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, JobStatus>) -> String {
+    for file in files {
+        if file_status.get(file).unwrap().clone() == JobStatus::Pending {
+            return file.clone();
+        }
+    }
+    return files.get(0).unwrap().clone();
 }
 
 #[tonic::async_trait]
@@ -150,8 +159,28 @@ impl Coordinator for CoordinatorService {
                         return Ok(Response::new(task))
                     }
                     JobStatus::MapPhase => {
-                        job_q.push_front(job);
-                        return Err(Status::not_found("Not implemented"))
+                        let mut input_file = job.file_status.lock().unwrap();
+                        let file = get_next_file(&job.files, &input_file);
+                        // println!("{:?}", input_file);
+                        // println!("{:?}", job.files);
+                        input_file.insert( file.clone(), JobStatus::MapPhase);
+
+                        let task = Task {
+                            input: file.clone(), 
+                            workload: job.job.workload.clone(),
+                            output: "/temp/".into(), //tmp file
+                            args: job.job.args.join(" "),
+                            status: "Map".into(),
+                        };
+                        let modified_job = Job {
+                            id: job.id.clone(),
+                            status: JobStatus::MapPhase,
+                            job: job.job.clone(),
+                            files: job.files.clone(),
+                            file_status: Arc::new(Mutex::new(input_file.clone())),
+                        };
+                        job_q.push_front(modified_job);
+                        return Ok(Response::new(task))
                     }
                     JobStatus::Shuffle => {
                         
