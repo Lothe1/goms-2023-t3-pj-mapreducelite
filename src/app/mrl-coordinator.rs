@@ -224,27 +224,15 @@ impl Coordinator for CoordinatorService {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!("Hello coordinator!\n");
     let args = Args::parse();
-    let port: u128 = match args.port {
-        Some(p) => p,
-        None => 50051,
-    };
-    let os_ip: String = match args.os {
-        Some(ip) => ip,
-        None => "localhost:9000".into()
-    };
-    let os_user: String = match args.user {
-        Some(user) => user,
-        None => "ROOTNAME".into()
-    };
-    let os_pw: String = match args.pw {
-        Some(pw) => pw,
-        None => "CHANGEME123".into()
-    };
+    let port: u128 = args.port.unwrap_or(50051);
+    let os_ip: String = args.os.unwrap_or_else(|| "localhost:9000".into());
+    let os_user: String = args.user.unwrap_or_else(|| "ROOTNAME".into());
+    let os_pw: String = args.pw.unwrap_or_else(|| "CHANGEME123".into());
     let addr = format!("127.0.0.1:{port}").parse().unwrap();
     let coordinator = CoordinatorService::new(os_ip.clone(), os_user.clone(), os_pw.clone(), minio::get_min_io_client(os_ip.clone(), os_user.clone(), os_pw.clone()).await.unwrap());
     println!("Coordinator listening on {}", addr);
     // Create a bucket for the coordinator, and the subdirectores if not exist
-    initialize_bucket_directories(&coordinator.s3_client).await.unwrap();
+    initialize_bucket_directories(&coordinator.s3_client).await?;
 
     // Start a new the gRPC server
     // and add the coordinator service to the server
