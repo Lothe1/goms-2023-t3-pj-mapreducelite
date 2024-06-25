@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::Jobs {} => {
             let response = client.list_jobs(Request::new(Empty {})).await?;
-            println!("Job list: {:?}", response);
+            println!("Job list: {:?}", response); 
         },
         Commands::Status {} => {
             let response = client.system_status(Request::new(Empty {})).await?;

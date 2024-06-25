@@ -1,8 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use aws_sdk_s3::primitives::DateTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 use aws_sdk_s3::Client;
+use dashmap::DashMap;
 // use anyhow::*;
 // use bytes::Bytes;
 use mrlite::*;
@@ -11,7 +11,6 @@ use cmd::coordinator::Args;
 // use tokio::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use tonic::{transport::Server, Request, Response, Status};
-use std::hash::{DefaultHasher, Hash, Hasher};
 
 mod mapreduce {
     tonic::include_proto!("mapreduce");
@@ -43,7 +42,8 @@ struct Job {
     id: String,
     status: JobStatus,
     job: standalone::Job,
-    files: usize,
+    engine: Workload,
+    files: DashMap<String, JobStatus>,
 }
 
 // The default state for a worker node is `Idle`, meaning no work is assigned but the worker is alive.
@@ -117,13 +117,14 @@ impl Coordinator for CoordinatorService {
     // This function is called by a worker node when it requests a task from the coordinator. 
     // Once a worker is registered and ready to perform work, it will periodically request tasks from the coordinator to execute
     async fn get_task(&self, _request: Request<WorkerRequest>) -> Result<Response<Task>, Status> {
-        let job_option = self.job_queue.lock().unwrap().pop_front();
-        match job_option {
+        let job_q = self.job_queue.lock().unwrap();
+        // let job_option = self.job_queue.lock().unwrap().pop_front();
+        match job_q.front() {
             Some(job) => {
                 let task = Task {
-                    input: job.job.input,
-                    workload: job.job.workload,
-                    output: job.job.output,
+                    input: job.job.input.clone(),
+                    workload: job.job.workload.clone(),
+                    output: job.job.output.clone(),
                     args: job.job.args.join(" ") // Convert vector of strings to a single string
                 };
                 Ok(Response::new(task))
@@ -135,16 +136,29 @@ impl Coordinator for CoordinatorService {
     // Submit a job to the job queue
     // and return a response to the client
     async fn submit_job(&self, request: Request<JobRequest>) -> Result<Response<JobResponse>, Status> {
+        let wl = match workload::try_named(&request.get_ref().workload.clone()) {
+            Some(engine) => engine,
+            None => {
+                return Ok(Response::new(JobResponse {
+                    success: false,
+                    message: "Invalid workload".into(),
+                })
+                )
+            }
+        };
+
         let standalone_job = standalone::Job {
             input: request.get_ref().input.clone(),
-            workload: request.get_ref().workload.clone(),
+            workload: request.get_ref().input.clone(),
             output: request.get_ref().output.clone(),
             args: request.get_ref().args.clone().split_whitespace().map(String::from).collect() // Change this to a vector of strings
         };
+        
+        let list_input_files = minio::list_files_with_prefix(&self.s3_client, "mrl-lite", &standalone_job.input).await.unwrap();
+        println!("Num files submitted: {}", list_input_files.len());
 
-        let num_files = minio::list_files_with_prefix(&self.s3_client, "mrl-lite", &standalone_job.input).await.unwrap();
-        println!("Num files submitted: {}", num_files.len());
-
+        let input_files: DashMap<String, JobStatus> = DashMap::new();
+        let _ = list_input_files.into_iter().map(|f| input_files.insert(f, JobStatus::Pending));
         // Creates the output directory 
         let _ = minio::create_directory(&self.s3_client, "mrl-lite", &standalone_job.output).await;
         println!("Output dir {} created", &standalone_job.output);
@@ -152,6 +166,7 @@ impl Coordinator for CoordinatorService {
         // Generates the job id for the job
         // let job_id = calculate_hash(&standalone_job).to_string();
         // let _ = minio::create_directory(&self.s3_client, "mrl-lite", &format!("/temp/temp-{}", job_id)).await;
+
         let job_id = format!("{:?}", SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_nanos());
         println!("{job_id}");
 
@@ -159,7 +174,8 @@ impl Coordinator for CoordinatorService {
             id: job_id,
             status: JobStatus::Pending,
             job: standalone_job, 
-            files: num_files.len(),
+            engine: wl,
+            files: input_files,
         };
 
         self.job_queue.lock().unwrap().push_back(job);

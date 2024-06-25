@@ -60,9 +60,9 @@ pub async fn initialize_bucket_directories(client: &Client) -> Result<(), Box<dy
     // if (object_exists(client, "mrl-lite", "/input/").await? ==  false){
     //     create_directory(client, "mrl-lite", "/input/").await?;
     // }
-    if (object_exists(client, "mrl-lite", "/output/").await? == false){
-        create_directory(client, "mrl-lite", "/output/").await?;
-    }
+    // if (object_exists(client, "mrl-lite", "/output/").await? == false){
+    //     create_directory(client, "mrl-lite", "/output/").await?;
+    // }
     if (object_exists(client, "mrl-lite", "/temp/").await? == false){
         create_directory(client, "mrl-lite", "/temp/").await?;
     }
