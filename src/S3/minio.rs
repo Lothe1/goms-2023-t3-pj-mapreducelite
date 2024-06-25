@@ -35,12 +35,14 @@ pub async fn object_exists(client: &Client, bucket: &str, object: &str) -> Resul
         Err(_) => Ok(false),
     }
 }
+
 pub async fn is_bucket_accessible(client: &Client, bucket_name: String) -> Result<bool, anyhow::Error>{
     match client.head_bucket().bucket(bucket_name).send().await {
         Ok(_) => Ok(true),
         Err(e) => Err(e.into()),
     }
 }
+
 pub async fn get_bucket_list(client: &Client)-> Result<(Vec<String>), Box<dyn Error>> {
     let resp = client.list_buckets().send().await?;
     let mut res = Vec::new();
@@ -49,14 +51,15 @@ pub async fn get_bucket_list(client: &Client)-> Result<(Vec<String>), Box<dyn Er
     }
     Ok(res)
 }
+
 pub async fn initialize_bucket_directories(client: &Client) -> Result<(), Box<dyn Error>>{
     let temp = get_bucket_list(client).await?;
     if !temp.contains(&"mrl-lite".to_string()){
         client.create_bucket().bucket("mrl-lite").send().await?;
     }
-    if (object_exists(client, "mrl-lite", "/input/").await? ==  false){
-        create_directory(client, "mrl-lite", "/input/").await?;
-    }
+    // if (object_exists(client, "mrl-lite", "/input/").await? ==  false){
+    //     create_directory(client, "mrl-lite", "/input/").await?;
+    // }
     if (object_exists(client, "mrl-lite", "/output/").await? == false){
         create_directory(client, "mrl-lite", "/output/").await?;
     }
@@ -66,7 +69,6 @@ pub async fn initialize_bucket_directories(client: &Client) -> Result<(), Box<dy
     Ok(())
 
 }
-
 
 // USEFUL STUFF THAT YOU GUYS PROBABLY USE
 pub async fn get_min_io_client(base_url: String, access_id: String, access_key: String) -> Result<Client, Box<dyn Error>> {
@@ -96,6 +98,7 @@ pub async fn get_min_io_client(base_url: String, access_id: String, access_key: 
     let s3_client = Client::new(&config_loader);
     Ok(s3_client)
 }
+
 pub async fn upload_string(client: &Client, bucket: &str, file_name: &str, content: &str) -> Result<(), Box<dyn std::error::Error> > {
     let put_request = client.put_object()
         .bucket(bucket)
@@ -104,6 +107,7 @@ pub async fn upload_string(client: &Client, bucket: &str, file_name: &str, conte
     put_request.send().await?;
     Ok(())
 }
+
 // Get object as String for now for test purposes
 pub async fn get_object(client: &Client, bucket: &str, object: &str) -> Result<String, anyhow::Error> {
     //Bucket is the name of the bucket, object is the name of the object
@@ -125,6 +129,7 @@ pub async fn get_object(client: &Client, bucket: &str, object: &str) -> Result<S
     let content_str = String::from_utf8(content)?;
     Ok(content_str)
 }
+
 //If wanna use this in main just
 // let bucket_name = "rust-s3";
 // let object_name = "/input/text2.txt";
@@ -139,7 +144,6 @@ pub async fn delete_object(client: &Client, bucket: &str, object: &str) -> Resul
     delete_request.send().await?;
     Ok(())
 }
-
 
 //havent check yet
 pub async fn list_files_with_prefix(client: &Client, bucket: &str, prefix: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {

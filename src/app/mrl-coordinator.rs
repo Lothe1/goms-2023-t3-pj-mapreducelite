@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
+use aws_sdk_s3::Client;
 // use anyhow::*;
 // use bytes::Bytes;
 use mrlite::*;
@@ -38,6 +39,7 @@ enum JobStatus {
 struct Job {
     status: JobStatus,
     job: standalone::Job,
+    files: usize,
 }
 
 // The default state for a worker node is `Idle`, meaning no work is assigned but the worker is alive.
@@ -58,27 +60,16 @@ struct WorkerNode {
     addr: SocketAddr,
 }
 
-// Implement the default trait for the CoordinatorService struct
-impl Default for CoordinatorService {
-    fn default() -> Self {
-        Self {
-            job_queue: Arc::new(Mutex::new(VecDeque::new())),
-            workers: Arc::new(Mutex::new(Vec::new())),
-            os_ip: "".into(),
-            os_user: "".into(),
-            os_pw: "".into(),
-        }
-    }
-}
-
+// Creates a new Coordinator Service with the supplied arguments
 impl CoordinatorService {
-    fn new(ip: impl ToString, user: impl ToString, pw: impl ToString) -> Self {
+    fn new(ip: impl ToString, user: impl ToString, pw: impl ToString, client: Client) -> Self {
         Self {
             job_queue: Arc::new(Mutex::new(VecDeque::new())),
             workers: Arc::new(Mutex::new(Vec::new())),
             os_ip: ip.to_string(),
             os_user: user.to_string(),
             os_pw: pw.to_string(),
+            s3_client: client,
         }
     }
 }
@@ -89,7 +80,8 @@ pub struct CoordinatorService {
     workers: Arc<Mutex<Vec<WorkerNode>>>,
     os_ip: String,
     os_user: String,
-    os_pw: String
+    os_pw: String,
+    s3_client: Client
 }
 
 #[tonic::async_trait]
@@ -146,9 +138,13 @@ impl Coordinator for CoordinatorService {
             args: request.get_ref().args.clone().split_whitespace().map(String::from).collect() // Change this to a vector of strings
         };
 
+        let num_files = minio::list_files_with_prefix(&self.s3_client, "mrl-lite", &standalone_job.input).await.unwrap();
+        println!("Num files submitted: {}", num_files.len());
+
         let job = Job {
             status: JobStatus::Pending,
             job: standalone_job, 
+            files: num_files.len(),
         };
 
         self.job_queue.lock().unwrap().push_back(job);
@@ -214,12 +210,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => "CHANGEME123".into()
     };
     let addr = format!("127.0.0.1:{port}").parse().unwrap();
-    let coordinator = CoordinatorService::new(os_ip.clone(), os_user.clone(), os_pw.clone());
+    let coordinator = CoordinatorService::new(os_ip.clone(), os_user.clone(), os_pw.clone(), minio::get_min_io_client(os_ip.clone(), os_user.clone(), os_pw.clone()).await.unwrap());
     println!("Coordinator listening on {}", addr);
-
     // Create a bucket for the coordinator, and the subdirectores if not exist
-    let client = minio::get_min_io_client(os_ip.clone(), os_user.clone(), os_pw.clone()).await.unwrap();
-    initialize_bucket_directories(&client).await.unwrap();
+    initialize_bucket_directories(&coordinator.s3_client).await.unwrap();
 
     // Start a new the gRPC server
     // and add the coordinator service to the server
