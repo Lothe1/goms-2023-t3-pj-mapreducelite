@@ -2,6 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use aws_sdk_s3::Client;
+use aws_sdk_s3::config::{Builder, Credentials, Region};
 use dashmap::DashMap;
 // use anyhow::*;
 // use bytes::Bytes;
@@ -220,6 +221,30 @@ impl Coordinator for CoordinatorService {
     }
 }
 
+async fn temp_get_minio_client() -> aws_sdk_s3::Client {
+    // Create credentials for local MinIO
+    let credentials = Credentials::new(
+        "ROOTNAME",
+        "CHANGEME123",
+        None,
+        None,
+        "minio",
+    );
+
+    // Create the S3 config
+    let config = Builder::new()
+        .region(Region::new("us-east-1"))
+        .endpoint_url("http://[::1]:9000") // localhost
+        .credentials_provider(credentials)
+        .behavior_version(aws_sdk_s3::config::BehaviorVersion::latest())
+        .build();
+
+    // Create the S3 client
+    let client = aws_sdk_s3::Client::from_conf(config);
+
+    return client;
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!("Hello coordinator!\n");
@@ -229,6 +254,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let os_user: String = args.user.unwrap_or_else(|| "ROOTNAME".into());
     let os_pw: String = args.pw.unwrap_or_else(|| "CHANGEME123".into());
     let addr = format!("127.0.0.1:{port}").parse().unwrap();
+
+    // let s3_client = temp_get_minio_client().await;
+    // let coordinator = CoordinatorService::new(os_ip.clone(), os_user.clone(), os_pw.clone(), s3_client.clone());
+
     let coordinator = CoordinatorService::new(os_ip.clone(), os_user.clone(), os_pw.clone(), minio::get_min_io_client(os_ip.clone(), os_user.clone(), os_pw.clone()).await.unwrap());
     println!("Coordinator listening on {}", addr);
     // Create a bucket for the coordinator, and the subdirectores if not exist
