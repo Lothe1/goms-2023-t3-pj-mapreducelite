@@ -1,5 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use aws_sdk_s3::primitives::DateTime;
 use aws_sdk_s3::Client;
 // use anyhow::*;
 // use bytes::Bytes;
@@ -9,6 +11,7 @@ use cmd::coordinator::Args;
 // use tokio::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use tonic::{transport::Server, Request, Response, Status};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 mod mapreduce {
     tonic::include_proto!("mapreduce");
@@ -25,7 +28,7 @@ use mrlite::S3::minio::initialize_bucket_directories;
 
 // Only one job should be in either of the following states: `{MapPhase, Shuffle, ShufflePhase}``; 
 // all other jobs should either be `Pending` or `Completed`.
-#[derive(Debug)]
+#[derive(Debug, Hash)]
 enum JobStatus {
     Pending,
     MapPhase,
@@ -37,6 +40,7 @@ enum JobStatus {
 // Struct for a Job, which holds the status of a job
 // and the assigned `standalone::Job`.
 struct Job {
+    id: String,
     status: JobStatus,
     job: standalone::Job,
     files: usize,
@@ -141,7 +145,18 @@ impl Coordinator for CoordinatorService {
         let num_files = minio::list_files_with_prefix(&self.s3_client, "mrl-lite", &standalone_job.input).await.unwrap();
         println!("Num files submitted: {}", num_files.len());
 
+        // Creates the output directory 
+        let _ = minio::create_directory(&self.s3_client, "mrl-lite", &standalone_job.output).await;
+        println!("Output dir {} created", &standalone_job.output);
+
+        // Generates the job id for the job
+        // let job_id = calculate_hash(&standalone_job).to_string();
+        // let _ = minio::create_directory(&self.s3_client, "mrl-lite", &format!("/temp/temp-{}", job_id)).await;
+        let job_id = format!("{:?}", SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_nanos());
+        println!("{job_id}");
+
         let job = Job {
+            id: job_id,
             status: JobStatus::Pending,
             job: standalone_job, 
             files: num_files.len(),
