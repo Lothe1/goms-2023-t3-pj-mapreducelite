@@ -2,7 +2,7 @@
 use aws_config::from_env;
 use aws_sdk_s3 as s3;
 use std::error::Error;
-use aws_sdk_s3::config::Credentials;
+use aws_sdk_s3::config::{Builder, Credentials};
 use aws_config::Region;
 
 use std::{fs::File, io::Write, path::PathBuf, process::exit};
@@ -70,6 +70,30 @@ pub async fn initialize_bucket_directories(client: &Client) -> Result<(), Box<dy
 
 }
 
+pub async fn get_local_minio_client() -> aws_sdk_s3::Client {
+    // Create credentials for local MinIO
+    let credentials = Credentials::new(
+        "ROOTNAME",
+        "CHANGEME123",
+        None,
+        None,
+        "minio",
+    );
+
+    // Create the S3 config
+    let config = Builder::new()
+        .region(Region::new("us-east-1"))
+        .endpoint_url("http://[::1]:9000") // localhost
+        .credentials_provider(credentials)
+        .behavior_version(aws_sdk_s3::config::BehaviorVersion::latest())
+        .build();
+
+    // Create the S3 client
+    let client = aws_sdk_s3::Client::from_conf(config);
+
+    return client;
+}
+
 // USEFUL STUFF THAT YOU GUYS PROBABLY USE
 pub async fn get_min_io_client(base_url: String, access_id: String, access_key: String) -> Result<Client, Box<dyn Error>> {
     // MinIO Server config
@@ -84,15 +108,14 @@ pub async fn get_min_io_client(base_url: String, access_id: String, access_key: 
             access_key,
             None,
             None,
-            "loaded-from-custom-env");
+            "minio");
 
     let config_loader = from_env()
         .region(region)
         .credentials_provider(credentials)
-        .endpoint_url("http://127.0.0.1:9000")
+        .endpoint_url(base_url)
         .behavior_version(s3::config::BehaviorVersion::latest())
         .load().await;
-
 
     // Create an S3 client
     let s3_client = Client::new(&config_loader);

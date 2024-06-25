@@ -18,9 +18,8 @@ mod mapreduce {
 }
 
 use mapreduce::coordinator_server::{Coordinator, CoordinatorServer};
-use mapreduce::{WorkerRegistration, WorkerResponse, WorkerRequest, Task, JobRequest, JobResponse, Empty, JobList, Status as SystemStatus, Worker};
-use mrlite::S3::minio;
-use mrlite::S3::minio::initialize_bucket_directories;
+use mapreduce::{WorkerRegistration, WorkerResponse, WorkerRequest, Task, JobRequest, JobResponse, WorkerReport, Empty, JobList, Status as SystemStatus, Worker};
+use mrlite::S3::minio::*;
 
 /* 
     Only one coordinator !!
@@ -150,18 +149,18 @@ impl Coordinator for CoordinatorService {
 
         let standalone_job = standalone::Job {
             input: request.get_ref().input.clone(),
-            workload: request.get_ref().input.clone(),
+            workload: request.get_ref().workload.clone(),
             output: request.get_ref().output.clone(),
             args: request.get_ref().args.clone().split_whitespace().map(String::from).collect() // Change this to a vector of strings
         };
         
-        let list_input_files = minio::list_files_with_prefix(&self.s3_client, "mrl-lite", &standalone_job.input).await.unwrap();
+        let list_input_files = list_files_with_prefix(&self.s3_client, "mrl-lite", &standalone_job.input).await.unwrap();
         println!("Num files submitted: {}", list_input_files.len());
 
         let input_files: DashMap<String, JobStatus> = DashMap::new();
         let _ = list_input_files.into_iter().map(|f| input_files.insert(f, JobStatus::Pending));
         // Creates the output directory 
-        let _ = minio::create_directory(&self.s3_client, "mrl-lite", &standalone_job.output).await;
+        let _ = create_directory(&self.s3_client, "mrl-lite", &standalone_job.output).await;
         println!("Output dir {} created", &standalone_job.output);
 
         // Generates the job id for the job
@@ -219,30 +218,10 @@ impl Coordinator for CoordinatorService {
             jobs: Vec::new(), // Add job details here if needed
         }))
     }
-}
 
-async fn temp_get_minio_client() -> aws_sdk_s3::Client {
-    // Create credentials for local MinIO
-    let credentials = Credentials::new(
-        "ROOTNAME",
-        "CHANGEME123",
-        None,
-        None,
-        "minio",
-    );
-
-    // Create the S3 config
-    let config = Builder::new()
-        .region(Region::new("us-east-1"))
-        .endpoint_url("http://[::1]:9000") // localhost
-        .credentials_provider(credentials)
-        .behavior_version(aws_sdk_s3::config::BehaviorVersion::latest())
-        .build();
-
-    // Create the S3 client
-    let client = aws_sdk_s3::Client::from_conf(config);
-
-    return client;
+    async fn report_task(&self, request: Request<WorkerReport>) -> Result<Response<WorkerResponse>, Status> {
+        Ok(Response::new(WorkerResponse { success: true, message: "".into(), args: HashMap::new()}))
+    }
 }
 
 #[tokio::main]
@@ -250,15 +229,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!("Hello coordinator!\n");
     let args = Args::parse();
     let port: u128 = args.port.unwrap_or(50051);
-    let os_ip: String = args.os.unwrap_or_else(|| "localhost:9000".into());
+    let os_ip: String = args.os.unwrap_or_else(|| "127.0.0.1:9000".into());
     let os_user: String = args.user.unwrap_or_else(|| "ROOTNAME".into());
     let os_pw: String = args.pw.unwrap_or_else(|| "CHANGEME123".into());
+    // Port to listen to
     let addr = format!("127.0.0.1:{port}").parse().unwrap();
 
-    // let s3_client = temp_get_minio_client().await;
-    // let coordinator = CoordinatorService::new(os_ip.clone(), os_user.clone(), os_pw.clone(), s3_client.clone());
+    // If having trouble connecting to minio vvvvvvvvv
+    // let s3_client = get_local_minio_client().await; 
+    let s3_client = get_min_io_client(format!("http://{}",os_ip.clone()), os_user.clone(), os_pw.clone()).await.unwrap();
+    let coordinator = CoordinatorService::new(os_ip.clone(), os_user.clone(), os_pw.clone(), s3_client.clone());
 
-    let coordinator = CoordinatorService::new(os_ip.clone(), os_user.clone(), os_pw.clone(), minio::get_min_io_client(os_ip.clone(), os_user.clone(), os_pw.clone()).await.unwrap());
     println!("Coordinator listening on {}", addr);
     // Create a bucket for the coordinator, and the subdirectores if not exist
     initialize_bucket_directories(&coordinator.s3_client).await?;
