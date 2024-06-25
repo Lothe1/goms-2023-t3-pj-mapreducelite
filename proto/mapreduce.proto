@@ -8,6 +8,7 @@ service Coordinator {
   rpc SubmitJob(JobRequest) returns (JobResponse);
   rpc ListJobs(Empty) returns (JobList);
   rpc SystemStatus(Empty) returns (Status);
+  rpc ReportTask(WorkerReport) returns (WorkerResponse);
 }
 
 message WorkerRegistration {}
@@ -19,6 +20,10 @@ message WorkerResponse {
 }
 
 message WorkerRequest {}
+
+message WorkerReport {
+  string file = 1;
+}
 
 message Task {
   string input = 1;
