@@ -30,6 +30,7 @@ message Task {
   string workload = 2;
   string output = 3;
   string args = 4;
+  string status = 5;
 }
 
 message JobRequest {

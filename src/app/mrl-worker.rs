@@ -1,5 +1,6 @@
 // use anyhow::*;
 #![ allow(warnings)]
+use itertools::Itertools;
 use mrlite::*;
 use bytes::Bytes;
 use clap::Parser;
@@ -41,9 +42,10 @@ async fn map(
 ) {
     let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error");
     let bucket_name = "mrl-lite";
-    let object_name = &job.output;
+    let object_name = &job.input;
+    println!("{:?}", object_name);
     match minio::get_object(&client, bucket_name, object_name).await {
-        Ok(content) => println!("{:?}", content),
+        Ok(content) => println!("{:?}", object_name),
         Err(e) => eprintln!("Failed to get object: {:?}", e),
     }
 }
@@ -120,8 +122,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
     // Listen for tasks
     loop {
         let resp = client.get_task(Request::new(WorkerRequest {  })).await;
-        if resp.is_err() {
-            sleep(Duration::from_secs(1)).await;
+        match resp {
+            Ok(t) => {
+                let task = t.into_inner();
+                let job = Job {
+                    input: task.input.clone(),
+                    workload: task.workload.clone(),
+                    output: task.output.clone(),
+                    args: Vec::new()
+                };
+                sleep(Duration::from_secs(1)).await;
+
+                map(&s3_client, &job).await;
+            }
+            Err(e) => {
+                // no task
+                sleep(Duration::from_secs(1)).await;
+            }
         }
     }
 }

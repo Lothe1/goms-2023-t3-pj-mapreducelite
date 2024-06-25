@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Builder, Credentials, Region};
-use dashmap::DashMap;
+use itertools::Itertools;
 // use anyhow::*;
 // use bytes::Bytes;
 use mrlite::*;
@@ -27,23 +27,24 @@ use mrlite::S3::minio::*;
 
 // Only one job should be in either of the following states: `{MapPhase, Shuffle, ShufflePhase}``; 
 // all other jobs should either be `Pending` or `Completed`.
-#[derive(Debug, Hash)]
+#[derive(Debug, Clone)]
 enum JobStatus {
     Pending,
     MapPhase,
     Shuffle,
-    ShufflePhase,
+    ReducePhase,
     Completed
 } 
 
 // Struct for a Job, which holds the status of a job
 // and the assigned `standalone::Job`.
+#[derive(Clone, Debug)]
 struct Job {
     id: String,
     status: JobStatus,
     job: standalone::Job,
-    engine: Workload,
-    files: DashMap<String, JobStatus>,
+    files: Vec<String>,
+    file_status: Arc<Mutex<HashMap<String, JobStatus>>>,
 }
 
 // The default state for a worker node is `Idle`, meaning no work is assigned but the worker is alive.
@@ -117,17 +118,58 @@ impl Coordinator for CoordinatorService {
     // This function is called by a worker node when it requests a task from the coordinator. 
     // Once a worker is registered and ready to perform work, it will periodically request tasks from the coordinator to execute
     async fn get_task(&self, _request: Request<WorkerRequest>) -> Result<Response<Task>, Status> {
-        let job_q = self.job_queue.lock().unwrap();
+        let mut job_q = self.job_queue.lock().unwrap();
         // let job_option = self.job_queue.lock().unwrap().pop_front();
-        match job_q.front() {
-            Some(job) => {
-                let task = Task {
-                    input: job.job.input.clone(),
-                    workload: job.job.workload.clone(),
-                    output: job.job.output.clone(),
-                    args: job.job.args.join(" ") // Convert vector of strings to a single string
-                };
-                Ok(Response::new(task))
+        match job_q.pop_front() {
+            Some(mut job) => {
+                match job.status {
+                    JobStatus::Pending => {
+                        // pick first file -> change job's status to MapPhase
+                        // println!("{:?}", job.files);
+                        let mut input_file = job.file_status.lock().unwrap();
+                        // println!("{:?}", input_file);
+                        // println!("{:?}", job.files);
+                        input_file.insert( job.files.get(0).unwrap().to_string().clone(), JobStatus::MapPhase);
+
+                        let task = Task {
+                            input: job.files.get(0).unwrap().to_string().clone(), 
+                            workload: job.job.workload.clone(),
+                            output: "/temp/".into(), //tmp file
+                            args: job.job.args.join(" "),
+                            status: "Map".into(),
+                        };
+                        let modified_job = Job {
+                            id: job.id.clone(),
+                            status: JobStatus::MapPhase,
+                            job: job.job.clone(),
+                            files: job.files.clone(),
+                            file_status: Arc::new(Mutex::new(input_file.clone())),
+                        };
+                        job_q.push_front(modified_job);
+                        // job.status = JobStatus::MapPhase;
+                        return Ok(Response::new(task))
+                    }
+                    JobStatus::MapPhase => {
+                        job_q.push_front(job);
+                        return Err(Status::not_found("Not implemented"))
+                    }
+                    JobStatus::Shuffle => {
+                        
+                        job_q.push_front(job);
+                        return Err(Status::not_found("Not implemented"))
+
+                    }
+                    JobStatus::ReducePhase => {
+                        
+                        job_q.push_front(job);
+                        return Err(Status::not_found("Not implemented"))
+
+                    }
+                    JobStatus::Completed => {
+                        job_q.push_front(job);
+                        return Err(Status::not_found("No job available"))
+                    }
+                }
             },
             None => Err(Status::not_found("No job available")),
         }
@@ -136,7 +178,7 @@ impl Coordinator for CoordinatorService {
     // Submit a job to the job queue
     // and return a response to the client
     async fn submit_job(&self, request: Request<JobRequest>) -> Result<Response<JobResponse>, Status> {
-        let wl = match workload::try_named(&request.get_ref().workload.clone()) {
+        let _ = match workload::try_named(&request.get_ref().workload.clone()) {
             Some(engine) => engine,
             None => {
                 return Ok(Response::new(JobResponse {
@@ -157,8 +199,8 @@ impl Coordinator for CoordinatorService {
         let list_input_files = list_files_with_prefix(&self.s3_client, "mrl-lite", &standalone_job.input).await.unwrap();
         println!("Num files submitted: {}", list_input_files.len());
 
-        let input_files: DashMap<String, JobStatus> = DashMap::new();
-        let _ = list_input_files.into_iter().map(|f| input_files.insert(f, JobStatus::Pending));
+        let mut input_files: HashMap<String, JobStatus> = HashMap::new();
+        let _ = list_input_files.clone().into_iter().for_each(|f| {input_files.insert(f, JobStatus::Pending);});
         // Creates the output directory 
         let _ = create_directory(&self.s3_client, "mrl-lite", &standalone_job.output).await;
         println!("Output dir {} created", &standalone_job.output);
@@ -170,12 +212,15 @@ impl Coordinator for CoordinatorService {
         let job_id = format!("{:?}", SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_nanos());
         println!("{job_id}");
 
+        println!("{:?}", input_files);
+
         let job = Job {
             id: job_id,
             status: JobStatus::Pending,
             job: standalone_job, 
-            engine: wl,
-            files: input_files,
+            // engine: wl,
+            files: list_input_files.clone(),
+            file_status: Arc::new(Mutex::new(input_files)),
         };
 
         self.job_queue.lock().unwrap().push_back(job);
@@ -191,16 +236,19 @@ impl Coordinator for CoordinatorService {
     async fn list_jobs(&self, _request: Request<Empty>) -> Result<Response<JobList>, Status> {
         let jobs = self.job_queue.lock().unwrap();
         // Define a standalone function to convert from Job to Task
-        fn job_to_task(job: mrlite::standalone::Job) -> Task {
+        fn job_to_task(job: Job) -> Task {
             Task {
-                input: job.input,
-                workload: job.workload,
-                output: job.output,
-                args: job.args.join(" ")
+                input: job.job.input,
+                workload: job.job.workload,
+                output: job.job.output,
+                args: job.job.args.join(" "),
+                status: format!("{:?}", job.status),
             }
         }
         // Use the job_to_task function inside the map function
-        let tasks: Vec<Task> = jobs.iter().map(|job| job_to_task(job.job.clone())).collect();
+        println!("{}", format!("--------------\n{:?}\n-------------", jobs));
+
+        let tasks: Vec<Task> = jobs.iter().map(|job| job_to_task(job.clone())).collect();
         Ok(Response::new(JobList { jobs: tasks }))
     }
     
