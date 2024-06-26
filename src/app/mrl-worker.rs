@@ -159,7 +159,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                 match task_complete {
                     Ok(_) => {
                         client.report_task(Request::new(WorkerReport { 
-                            file: task.input.clone()
+                            task: task.status.clone(),
+                            input: task.input.clone(),
+                            output: task.output.clone(),
                         })).await;
                     }
                     Err(err) => {
