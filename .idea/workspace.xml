@@ -8,10 +8,10 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="e45907d0-62a3-4cf1-8d13-3074578d09ff" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/src/S3/docker.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/S3/minio.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Cargo.lock" beforeDir="false" afterPath="$PROJECT_DIR$/Cargo.lock" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Cargo.toml" beforeDir="false" afterPath="$PROJECT_DIR$/Cargo.toml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/lib.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/lib.rs" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -41,9 +41,10 @@
   </component>
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
+    &quot;Cargo.Run mrl-ctl.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.rust.reset.selective.auto.import&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;Implemented-Encoder&quot;,
     &quot;last_opened_file_path&quot;: &quot;/Users/tath/Desktop/University/Guts of Modern System/goms-2023-t3-pj-mrl-catlover645&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
@@ -107,6 +108,8 @@
       <option name="presentableId" value="Default" />
       <updated>1719068914749</updated>
       <workItem from="1719068915856" duration="492000" />
+      <workItem from="1719394604724" duration="1745000" />
+      <workItem from="1719419460180" duration="1728000" />
     </task>
     <servers />
   </component>
