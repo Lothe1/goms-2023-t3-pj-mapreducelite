@@ -52,6 +52,12 @@ async fn map(
     Ok(())
 }
 
+async fn reduce(
+    client: &Client,
+    job: &Job
+) -> Result<(), anyhow::Error> {
+    Ok(())
+}
 
 // pub fn perform_map(
 //     job: &Job,
@@ -137,7 +143,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                 let _ = sleep(Duration::from_secs(1)).await;
                 // if it is a mapPhase -> call map
                 // if it is a ReducePhase -> call reduce
-                let task_complete = map(&s3_client, &job).await;
+                let task_complete = match task.status.clone() {
+                    s if s==format!("Map") => {
+                        map(&s3_client, &job).await
+                    }
+                    s if s==format!("Reduce") => {
+                        reduce(&s3_client, &job).await
+                    }
+                    _ => {
+                        // should not reach here
+                        eprintln!("Invalid task assigned!");
+                        map(&s3_client, &job).await
+                    }
+                };
                 match task_complete {
                     Ok(_) => {
                         client.report_task(Request::new(WorkerReport { 
