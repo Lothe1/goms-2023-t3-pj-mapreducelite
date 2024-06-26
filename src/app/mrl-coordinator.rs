@@ -321,10 +321,29 @@ impl Coordinator for CoordinatorService {
                     }
                     JobStatus::ReducePhase => {
                         
-                        job_q.push_front(job);
-                        println!("Gave a pending task or lagging task");
-
-                        return Err(Status::not_found("Not implemented"))
+                        let mut input_file = job.file_status.lock().unwrap();
+                        let new_status = FileStatus {
+                            status: JobStatus::ReducePhase,
+                            elapsed: now(),
+                        };
+                        input_file.insert(job.files.get(0).unwrap().to_string().clone(), new_status.clone());
+                        let task = Task {
+                            input: job.files.get(0).unwrap().to_string().clone(), 
+                            workload: job.job.workload.clone(),
+                            output: "/temp/".into(), 
+                            args: job.job.args.join(" "),
+                            status: "Reduce".into(),
+                        };
+                        let modified_job = Job {
+                            id: job.id.clone(),
+                            status: JobStatus::ReducePhase,
+                            job: job.job.clone(),
+                            files: job.files.clone(),
+                            file_status: Arc::new(Mutex::new(input_file.clone())),
+                        };
+                        job_q.push_front(modified_job);
+                        println!("Gave a reducing task");
+                        return Ok(Response::new(task))
 
                     }
                     JobStatus::Completed => {
@@ -332,6 +351,9 @@ impl Coordinator for CoordinatorService {
                         println!("Should not occur yet");
 
                         return Err(Status::not_found("No job available"))
+                    }
+                    _ => {
+                        return Err(Status::unimplemented("Feature not implemented yet"))
                     }
                 }
             },
@@ -489,8 +511,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("127.0.0.1:{port}").parse().unwrap();
 
     // If having trouble connecting to minio vvvvvvvvv
-    // let s3_client = get_local_minio_client().await; 
-    let s3_client = get_min_io_client(format!("http://{}",os_ip.clone()), os_user.clone(), os_pw.clone()).await.unwrap();
+    let s3_client = get_local_minio_client().await; 
+    // let s3_client = get_min_io_client(format!("http://{}",os_ip.clone()), os_user.clone(), os_pw.clone()).await.unwrap();
     let coordinator = CoordinatorService::new(os_ip.clone(), os_user.clone(), os_pw.clone(), s3_client.clone());
 
     println!("Coordinator listening on {}", addr);
