@@ -318,13 +318,51 @@ impl Coordinator for CoordinatorService {
 
                         return Err(Status::not_found("Not implemented"))
 
+                        // let input_file = job.file_status.lock().unwrap();
+                        // let task = Task {
+                        //     input: job.files.iter().join(","),
+                        //     workload: job.files.get(0).unwrap().to_string().clone(),
+                        //     output: "/temp/".into(),
+                        //     args: job.job.args.join(" "),
+                        //     status: "Shuffle".into(),
+                        // };
+                        // let modified_job = Job {
+                        //     id: job.id.clone(),
+                        //     status: JobStatus::ReducePhase,
+                        //     job: job.job.clone(),
+                        //     files: job.files.clone(),
+                        //     file_status: Arc::new(Mutex::new(input_file.clone())),
+                        // };
+                        // job_q.push_front(modified_job);
+                        // println!("Gave a shuffle task");
+                        // return Ok(Response::new(task));
+
                     }
                     JobStatus::ReducePhase => {
                         
-                        job_q.push_front(job);
-                        println!("Gave a pending task or lagging task");
-
-                        return Err(Status::not_found("Not implemented"))
+                        let mut input_file = job.file_status.lock().unwrap();
+                        let new_status = FileStatus {
+                            status: JobStatus::ReducePhase,
+                            elapsed: now(),
+                        };
+                        input_file.insert(job.files.get(0).unwrap().to_string().clone(), new_status.clone());
+                        let task = Task {
+                            input: job.files.get(0).unwrap().to_string().clone(), 
+                            workload: job.job.workload.clone(),
+                            output: "/temp/".into(), 
+                            args: job.job.args.join(" "),
+                            status: "Reduce".into(),
+                        };
+                        let modified_job = Job {
+                            id: job.id.clone(),
+                            status: JobStatus::ReducePhase,
+                            job: job.job.clone(),
+                            files: job.files.clone(),
+                            file_status: Arc::new(Mutex::new(input_file.clone())),
+                        };
+                        job_q.push_front(modified_job);
+                        println!("Gave a reducing task");
+                        return Ok(Response::new(task))
 
                     }
                     JobStatus::Completed => {
@@ -333,9 +371,12 @@ impl Coordinator for CoordinatorService {
 
                         return Err(Status::not_found("No job available"))
                     }
+                    _ => {
+                        return Err(Status::unimplemented("Feature not implemented yet"))
+                    }
                 }
             },
-            None => Err(Status::not_found("No job available")),
+            None => return Err(Status::not_found("No job available"))
         }
     }
 
@@ -423,11 +464,24 @@ impl Coordinator for CoordinatorService {
             address: worker.addr.to_string().clone(),
             state: format!("{:?}", worker.state),
         }).collect();
+        
+        let job_q = self.job_queue.lock().unwrap();
+        let mut jobs = Vec::new();
+        for job in job_q.iter() {
+            let task = Task {
+                input: job.files.iter().join(","),
+                workload: job.job.workload.clone(),
+                output: job.job.output.clone(),
+                args: job.job.args.join(" "),
+                status: format!("{:?}", job.status),
+            };
+            jobs.push(task);
+        }
 
         Ok(Response::new(SystemStatus {
             worker_count: workers.len() as i32,
             workers: worker_list,
-            jobs: Vec::new(), // Add job details here if needed
+            jobs: jobs,
         }))
     }
 
@@ -489,8 +543,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("127.0.0.1:{port}").parse().unwrap();
 
     // If having trouble connecting to minio vvvvvvvvv
-    // let s3_client = get_local_minio_client().await; 
-    let s3_client = get_min_io_client(format!("http://{}",os_ip.clone()), os_user.clone(), os_pw.clone()).await.unwrap();
+    let s3_client = get_local_minio_client().await; 
+    // let s3_client = get_min_io_client(format!("http://{}",os_ip.clone()), os_user.clone(), os_pw.clone()).await.unwrap();
     let coordinator = CoordinatorService::new(os_ip.clone(), os_user.clone(), os_pw.clone(), s3_client.clone());
 
     println!("Coordinator listening on {}", addr);
