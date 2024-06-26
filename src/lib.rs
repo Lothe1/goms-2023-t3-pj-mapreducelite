@@ -13,6 +13,7 @@ pub mod utils;
 pub mod workload;
 pub mod cmd;
 pub mod S3;
+pub mod Encode;
 
 /////////////////////////////////////////////////////////////////////////////
 // MapReduce application types
@@ -58,7 +59,6 @@ pub struct Workload {
 pub struct KeyValue {
     /// The key.
     pub key: Bytes,
-
     /// The value.
     pub value: Bytes,
 }
