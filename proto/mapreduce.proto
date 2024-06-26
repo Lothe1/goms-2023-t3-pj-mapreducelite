@@ -22,7 +22,9 @@ message WorkerResponse {
 message WorkerRequest {}
 
 message WorkerReport {
-  string file = 1;
+  string task = 1;
+  string input = 2;
+  string output = 3;
 }
 
 message Task {

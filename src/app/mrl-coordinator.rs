@@ -44,6 +44,14 @@ struct FileStatus {
     elapsed: u128,
 }
 
+#[derive(Debug)]
+struct FileStatusCounter {
+    pending: usize,
+    mapping: usize,
+    shuffle: usize,
+    reducing: usize,
+    complete: usize
+}
 // Struct for a Job, which holds the status of a job
 // and the assigned `standalone::Job`.
 #[derive(Clone, Debug)]
@@ -127,6 +135,80 @@ fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>)
     return None;
 }
 
+fn next_state(file: &String, file_status: &HashMap<String, FileStatus>) -> Option<JobStatus> {
+    let completed = file_status.get(file);
+    match completed {
+        Some(f_s) => {
+            if f_s.status.eq(&JobStatus::MapPhase) {
+                Some(JobStatus::Shuffle)
+            } else if f_s.status.eq(&JobStatus::ReducePhase) {
+                Some(JobStatus::Completed)
+            }
+            else {
+                None
+            }
+        }
+        None => {
+            None
+        }
+    }
+}
+
+/// Used to check the status of a job and possibly inform whether or not 
+/// the job's status can be changed to the next level.
+fn check_all_file_states(files: &Vec<String>, file_status: &HashMap<String, FileStatus>) -> Option<JobStatus> {
+    // if all files are in shuffle phase, then we change job status to shuffle
+    let n_files = files.len();
+    let mut status_counter: FileStatusCounter = FileStatusCounter {
+        pending: 0,
+        mapping: 0,
+        shuffle: 0,
+        reducing: 0,
+        complete: 0
+    };
+    for file in files {
+        match file_status.get(file) {
+            Some(f) => {
+                match f.status {
+                    JobStatus::Pending => {
+                        status_counter.pending += 1;
+                    }
+                    JobStatus::MapPhase => {
+                        status_counter.mapping += 1;
+                    }
+                    JobStatus::Shuffle => {
+                        status_counter.shuffle += 1;
+                    }
+                    JobStatus::ReducePhase => {
+                        status_counter.reducing += 1;
+
+                    }
+                    JobStatus::Completed => {
+                        status_counter.complete += 1;
+                    }
+                }
+            }
+            None => {
+                // Should not reach here
+                eprintln!("File & FileStatus mismatch");
+            }
+        }
+    }
+    if status_counter.complete == n_files {
+        Some(JobStatus::Completed)
+    } else if status_counter.shuffle == n_files {
+        Some(JobStatus::Shuffle)
+    } else if status_counter.pending == n_files {
+        Some(JobStatus::Pending)
+    } else if status_counter.mapping <= n_files {
+        Some(JobStatus::MapPhase)
+    } else if status_counter.reducing <= n_files {
+        Some(JobStatus::ReducePhase)
+    } else {
+        // Should not be reached unless I'm tripping
+        None
+    }
+}
 #[tonic::async_trait]
 impl Coordinator for CoordinatorService {
 
@@ -349,7 +431,48 @@ impl Coordinator for CoordinatorService {
         }))
     }
 
+    /// gRPC call for workers to inform the coordinator that they have finished
+    /// a task on the file given to them.
     async fn report_task(&self, request: Request<WorkerReport>) -> Result<Response<WorkerResponse>, Status> {
+        let completed_file = request.get_ref().input.clone();
+        let mut job_q = self.job_queue.lock().unwrap();
+        // If the file status is currently in MapPhase -> change file state to Shuffle
+        // If the file status is currently in ReducePhase -> change file state to Completed
+        match job_q.pop_front() {
+            Some(job) => {
+                let mut file_status = job.file_status.lock().unwrap();
+                let next_file_state = next_state(&completed_file, &file_status);
+                let new_status = FileStatus {
+                    status: next_file_state.unwrap(),
+                    elapsed: 0,
+                };
+                file_status.insert(completed_file.clone(), new_status);
+                let next_job_state = check_all_file_states(&job.files, &file_status).unwrap();
+                if job.status.ne(&next_job_state) {
+                    let modified_job = Job {
+                        id: job.id.clone(),
+                        status: next_job_state,
+                        job: job.job.clone(),
+                        files: job.files.clone(),
+                        file_status: Arc::new(Mutex::new(file_status.clone())),
+                    };
+                    job_q.push_front(modified_job);
+                } else {
+                    let modified_job = Job {
+                        id: job.id.clone(),
+                        status: job.status.clone(),
+                        job: job.job.clone(),
+                        files: job.files.clone(),
+                        file_status: Arc::new(Mutex::new(file_status.clone())),
+                    };
+                    job_q.push_front(modified_job);
+                }
+            }
+            None => {
+                // Nothing in queue.. what u submitting?
+                return Err(Status::not_found("No jobs in queue"))
+            }
+        }
         Ok(Response::new(WorkerResponse { success: true, message: "".into(), args: HashMap::new()}))
     }
 }
