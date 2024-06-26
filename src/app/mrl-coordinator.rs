@@ -318,6 +318,25 @@ impl Coordinator for CoordinatorService {
 
                         return Err(Status::not_found("Not implemented"))
 
+                        // let input_file = job.file_status.lock().unwrap();
+                        // let task = Task {
+                        //     input: job.files.iter().join(","),
+                        //     workload: job.files.get(0).unwrap().to_string().clone(),
+                        //     output: "/temp/".into(),
+                        //     args: job.job.args.join(" "),
+                        //     status: "Shuffle".into(),
+                        // };
+                        // let modified_job = Job {
+                        //     id: job.id.clone(),
+                        //     status: JobStatus::ReducePhase,
+                        //     job: job.job.clone(),
+                        //     files: job.files.clone(),
+                        //     file_status: Arc::new(Mutex::new(input_file.clone())),
+                        // };
+                        // job_q.push_front(modified_job);
+                        // println!("Gave a shuffle task");
+                        // return Ok(Response::new(task));
+
                     }
                     JobStatus::ReducePhase => {
                         
@@ -357,7 +376,7 @@ impl Coordinator for CoordinatorService {
                     }
                 }
             },
-            None => Err(Status::not_found("No job available")),
+            None => return Err(Status::not_found("No job available"))
         }
     }
 
@@ -445,11 +464,24 @@ impl Coordinator for CoordinatorService {
             address: worker.addr.to_string().clone(),
             state: format!("{:?}", worker.state),
         }).collect();
+        
+        let job_q = self.job_queue.lock().unwrap();
+        let mut jobs = Vec::new();
+        for job in job_q.iter() {
+            let task = Task {
+                input: job.files.iter().join(","),
+                workload: job.job.workload.clone(),
+                output: job.job.output.clone(),
+                args: job.job.args.join(" "),
+                status: format!("{:?}", job.status),
+            };
+            jobs.push(task);
+        }
 
         Ok(Response::new(SystemStatus {
             worker_count: workers.len() as i32,
             workers: worker_list,
-            jobs: Vec::new(), // Add job details here if needed
+            jobs: jobs,
         }))
     }
 
