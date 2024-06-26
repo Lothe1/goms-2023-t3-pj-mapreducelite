@@ -15,20 +15,6 @@ use aws_sdk_s3::Client;
 use S3::minio;
 use standalone::Job;
 
-// #[derive(Parser)]
-// struct WorkerArgs {
-//     #[clap(long)]
-//     join: String,
-//     #[clap(long)]
-//     s3_endpoint: String,
-//     #[clap(long)]
-//     s3_bucket: String,
-//     #[clap(long)]
-//     s3_access_key: String,
-//     #[clap(long)]
-//     s3_secret_key: String,
-// }
-
 mod mapreduce {
     tonic::include_proto!("mapreduce");
 }
