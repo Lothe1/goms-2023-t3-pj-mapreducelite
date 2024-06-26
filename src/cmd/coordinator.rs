@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -17,4 +19,8 @@ pub struct Args {
     /// Login Password of the Object Store
     #[clap(short, long, default_value = None, short = 'p')]
     pub pw: Option<String>,
+}
+
+pub fn now() -> u128 {
+    SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_nanos()
 }

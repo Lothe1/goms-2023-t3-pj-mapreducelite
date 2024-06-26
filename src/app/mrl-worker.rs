@@ -33,13 +33,13 @@ mod mapreduce {
     tonic::include_proto!("mapreduce");
 }
 
-use mapreduce::{WorkerRegistration, WorkerRequest, Task, JobRequest};
+use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest};
 use mapreduce::coordinator_client::CoordinatorClient;
 
 async fn map(
     client: &Client,
     job: &Job
-) {
+) -> Result<(), anyhow::Error> {
     let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error");
     let bucket_name = "mrl-lite";
     let object_name = &job.input;
@@ -48,6 +48,8 @@ async fn map(
         Ok(content) => println!("{:?}", object_name),
         Err(e) => eprintln!("Failed to get object: {:?}", e),
     }
+    // Do the mapping stuff :)
+    Ok(())
 }
 
 
@@ -132,8 +134,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                     args: Vec::new()
                 };
                 sleep(Duration::from_secs(1)).await;
-
-                map(&s3_client, &job).await;
+                // if it is a mapPhase -> call map
+                // if it is a ReducePhase -> call reduce
+                let task_complete = map(&s3_client, &job).await;
+                match task_complete {
+                    Ok(_) => {
+                        client.report_task(Request::new(WorkerReport { 
+                            file: task.input.clone()
+                        })).await;
+                    }
+                    Err(err) => {
+                        // should not occur.... just saying :/
+                        eprintln!("{:?}", err)
+                    }
+                }
             }
             Err(e) => {
                 // no task

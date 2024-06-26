@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Builder, Credentials, Region};
 use itertools::Itertools;
@@ -8,7 +8,7 @@ use itertools::Itertools;
 // use bytes::Bytes;
 use mrlite::*;
 use clap::Parser;
-use cmd::coordinator::Args;
+use cmd::coordinator::{now, Args};
 // use tokio::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use tonic::{transport::Server, Request, Response, Status};
@@ -36,6 +36,12 @@ enum JobStatus {
     Completed
 } 
 
+#[derive(Debug, Clone)]
+struct FileStatus {
+    status: JobStatus,
+    elapsed: u128,
+}
+
 // Struct for a Job, which holds the status of a job
 // and the assigned `standalone::Job`.
 #[derive(Clone, Debug)]
@@ -44,7 +50,7 @@ struct Job {
     status: JobStatus,
     job: standalone::Job,
     files: Vec<String>,
-    file_status: Arc<Mutex<HashMap<String, JobStatus>>>,
+    file_status: Arc<Mutex<HashMap<String, FileStatus>>>,
 }
 
 // The default state for a worker node is `Idle`, meaning no work is assigned but the worker is alive.
@@ -89,10 +95,27 @@ pub struct CoordinatorService {
     s3_client: Client
 }
 
-fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, JobStatus>) -> String {
+fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>) -> String {
     for file in files {
-        if file_status.get(file).unwrap().clone() == JobStatus::Pending {
-            return file.clone();
+        let this_file_status = file_status.get(file).unwrap();
+        match this_file_status.status {
+            JobStatus::Pending => {
+                return file.clone();
+            }
+            JobStatus::MapPhase => {
+                if (now() - this_file_status.elapsed) > Duration::from_secs(15).as_nanos() {
+                    return file.clone();
+                }
+            }
+            JobStatus::Shuffle => {
+
+            }
+            JobStatus::ReducePhase => {
+
+            }
+            JobStatus::Completed => {
+
+            }
         }
     }
     return files.get(0).unwrap().clone();
@@ -138,7 +161,11 @@ impl Coordinator for CoordinatorService {
                         let mut input_file = job.file_status.lock().unwrap();
                         // println!("{:?}", input_file);
                         // println!("{:?}", job.files);
-                        input_file.insert( job.files.get(0).unwrap().to_string().clone(), JobStatus::MapPhase);
+                        let new_status = FileStatus {
+                            status: JobStatus::MapPhase,
+                            elapsed: now(),
+                        };
+                        input_file.insert( job.files.get(0).unwrap().to_string().clone(), new_status.clone());
 
                         let task = Task {
                             input: job.files.get(0).unwrap().to_string().clone(), 
@@ -156,6 +183,7 @@ impl Coordinator for CoordinatorService {
                         };
                         job_q.push_front(modified_job);
                         // job.status = JobStatus::MapPhase;
+                        println!("Gave a pending task");
                         return Ok(Response::new(task))
                     }
                     JobStatus::MapPhase => {
@@ -163,7 +191,11 @@ impl Coordinator for CoordinatorService {
                         let file = get_next_file(&job.files, &input_file);
                         // println!("{:?}", input_file);
                         // println!("{:?}", job.files);
-                        input_file.insert( file.clone(), JobStatus::MapPhase);
+                        let new_status = FileStatus {
+                            status: JobStatus::MapPhase,
+                            elapsed: now(),
+                        };
+                        input_file.insert( file.clone(), new_status.clone());
 
                         let task = Task {
                             input: file.clone(), 
@@ -180,22 +212,29 @@ impl Coordinator for CoordinatorService {
                             file_status: Arc::new(Mutex::new(input_file.clone())),
                         };
                         job_q.push_front(modified_job);
+                        println!("Gave a pending task or lagging task");
                         return Ok(Response::new(task))
                     }
                     JobStatus::Shuffle => {
                         
                         job_q.push_front(job);
+                        println!("Gave a pending task");
+
                         return Err(Status::not_found("Not implemented"))
 
                     }
                     JobStatus::ReducePhase => {
                         
                         job_q.push_front(job);
+                        println!("Gave a pending task or lagging task");
+
                         return Err(Status::not_found("Not implemented"))
 
                     }
                     JobStatus::Completed => {
                         job_q.push_front(job);
+                        println!("Should not occur yet");
+
                         return Err(Status::not_found("No job available"))
                     }
                 }
@@ -228,8 +267,8 @@ impl Coordinator for CoordinatorService {
         let list_input_files = list_files_with_prefix(&self.s3_client, "mrl-lite", &standalone_job.input).await.unwrap();
         println!("Num files submitted: {}", list_input_files.len());
 
-        let mut input_files: HashMap<String, JobStatus> = HashMap::new();
-        let _ = list_input_files.clone().into_iter().for_each(|f| {input_files.insert(f, JobStatus::Pending);});
+        let mut input_files: HashMap<String, FileStatus> = HashMap::new();
+        let _ = list_input_files.clone().into_iter().for_each(|f| {input_files.insert(f, FileStatus { status: JobStatus::Pending, elapsed: 0 });});
         // Creates the output directory 
         let _ = create_directory(&self.s3_client, "mrl-lite", &standalone_job.output).await;
         println!("Output dir {} created", &standalone_job.output);
