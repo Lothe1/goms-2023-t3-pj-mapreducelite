@@ -123,6 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
 
     // Listen for tasks
     loop {
+        println!("Sending a request for a job!");
         let resp = client.get_task(Request::new(WorkerRequest {  })).await;
         match resp {
             Ok(t) => {
@@ -133,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                     output: task.output.clone(),
                     args: Vec::new()
                 };
-                sleep(Duration::from_secs(1)).await;
+                let _ = sleep(Duration::from_secs(1)).await;
                 // if it is a mapPhase -> call map
                 // if it is a ReducePhase -> call reduce
                 let task_complete = map(&s3_client, &job).await;
@@ -151,7 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
             }
             Err(e) => {
                 // no task
-                sleep(Duration::from_secs(1)).await;
+                let _ = sleep(Duration::from_secs(1)).await;
             }
         }
     }

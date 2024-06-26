@@ -25,6 +25,8 @@ use mrlite::S3::minio::*;
     Only one coordinator !!
 */
 
+const STRAGGLE_LIMIT: u128 = Duration::from_secs(15).as_nanos();
+
 // Only one job should be in either of the following states: `{MapPhase, Shuffle, ShufflePhase}``; 
 // all other jobs should either be `Pending` or `Completed`.
 #[derive(Debug, Clone, PartialEq)]
@@ -95,16 +97,19 @@ pub struct CoordinatorService {
     s3_client: Client
 }
 
-fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>) -> String {
+fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>) -> Option<String> {
     for file in files {
         let this_file_status = file_status.get(file).unwrap();
         match this_file_status.status {
             JobStatus::Pending => {
-                return file.clone();
+                println!("Pending task");
+                return Some(file.clone());
             }
             JobStatus::MapPhase => {
-                if (now() - this_file_status.elapsed) > Duration::from_secs(15).as_nanos() {
-                    return file.clone();
+                let elapsed = now() - this_file_status.elapsed;
+                if (elapsed) > STRAGGLE_LIMIT {
+                    println!("Straggling task");
+                    return Some(file.clone());
                 }
             }
             JobStatus::Shuffle => {
@@ -118,7 +123,8 @@ fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>)
             }
         }
     }
-    return files.get(0).unwrap().clone();
+    println!("No task!");
+    return None;
 }
 
 #[tonic::async_trait]
@@ -153,7 +159,7 @@ impl Coordinator for CoordinatorService {
         let mut job_q = self.job_queue.lock().unwrap();
         // let job_option = self.job_queue.lock().unwrap().pop_front();
         match job_q.pop_front() {
-            Some(mut job) => {
+            Some(job) => {
                 match job.status {
                     JobStatus::Pending => {
                         // pick first file -> change job's status to MapPhase
@@ -188,7 +194,15 @@ impl Coordinator for CoordinatorService {
                     }
                     JobStatus::MapPhase => {
                         let mut input_file = job.file_status.lock().unwrap();
-                        let file = get_next_file(&job.files, &input_file);
+                        // let opt_file = get_next_file(&job.files, &input_file);
+                        let file = match get_next_file(&job.files, &input_file) {
+                            Some(f) => f,
+                            None => { 
+                                let modified_job = job.clone();
+                                job_q.push_front(modified_job);
+                                return Err(Status::not_found("No job available"))
+                            }
+                        };
                         // println!("{:?}", input_file);
                         // println!("{:?}", job.files);
                         let new_status = FileStatus {
