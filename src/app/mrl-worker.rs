@@ -6,6 +6,7 @@ use mrlite::*;
 use bytes::Bytes;
 use clap::Parser;
 use cmd::worker::Args;
+use prost::Name;
 use tokio::time::sleep;
 use tonic::{Request, Response};
 use tonic::{transport::Server, Status};
@@ -28,7 +29,7 @@ mod mapreduce {
 use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse};
 use mapreduce::coordinator_client::CoordinatorClient;
 
-async fn map(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
+async fn map(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
     let bucket_name = "mrl-lite";
     let object_name = &job.input;
@@ -71,10 +72,10 @@ async fn map(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
         Err(e) => eprintln!("Failed to upload: {:?}", e),
     }
 
-    Ok(())
+    Ok(filename.to_string())
 }
 
-async fn reduce(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
+async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error loading workload");
     let bucket_name = "mrl-lite";
     let object_name = &job.input;
@@ -117,11 +118,11 @@ async fn reduce(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
     }
 
     match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
-        Ok(_) => println!("Uploaded"),
+        Ok(_) => println!("Uploaded to {}{}", job.output, filename),
         Err(e) => eprintln!("Failed to upload: {:?}", e),
     }
 
-    Ok(())
+    Ok(filename.to_string())
 }
 
 #[tokio::main]
@@ -167,30 +168,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 // Process task based on its type
-                match task.status.as_str() {
+                let out_fn = match task.status.as_str() {
                     "Map" => {
-                        if let Err(err) = map(&s3_client, &job).await {
-                            eprintln!("Error during map task: {:?}", err);
+                        match map(&s3_client, &job).await {
+                            Ok(name) => Some(name),
+                            Err(err) => {
+                                eprintln!("Error during map task: {:?}", err);
+                                None
+                            }
                         }
                     }
                     "Reduce" => {
-                        if let Err(err) = reduce(&s3_client, &job).await {
-                            eprintln!("Error during reduce task: {:?}", err);
+                        match reduce(&s3_client, &job).await {
+                            Ok(name) => Some(name),
+                            Err(err) => {
+                                eprintln!("Error during reduce task: {:?}", err);
+                                None
+                            }
                         }
                     }
                     _ => {
                         eprintln!("Invalid task status received: {}", task.status);
+                        None
                     }
-                }
+                };
 
-                // Report task completion to coordinator
-                let report = Request::new(WorkerReport {
-                    task: task.status,
-                    input: task.input,
-                    output: task.output,
-                });
-                if let Err(err) = client.report_task(report).await {
-                    eprintln!("Error reporting task completion: {:?}", err);
+                if out_fn.is_some() {
+                    // Report task completion to coordinator
+                    let report = Request::new(WorkerReport {
+                        task: task.status,
+                        input: task.input,
+                        output: format!("{}{}", task.output, out_fn.unwrap()),
+                    });
+                    if let Err(err) = client.report_task(report).await {
+                        eprintln!("Error reporting task completion: {:?}", err);
+                    }
                 }
             }
             Err(status) => {

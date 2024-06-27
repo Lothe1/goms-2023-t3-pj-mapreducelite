@@ -121,13 +121,18 @@ fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>)
                 }
             }
             JobStatus::Shuffle => {
-
+                println!("Pending task");
+                return Some(file.clone());
             }
             JobStatus::ReducePhase => {
-
+                let elapsed = now() - this_file_status.elapsed;
+                if (elapsed) > STRAGGLE_LIMIT {
+                    println!("Straggling task");
+                    return Some(file.clone());
+                }
             }
             JobStatus::Completed => {
-
+                return None;
             }
         }
     }
@@ -198,21 +203,23 @@ fn check_all_file_states(files: &Vec<String>, file_status: &HashMap<String, File
             }
         }
     }
+    println!("{:?}", status_counter);
     if status_counter.complete == n_files {
         Some(JobStatus::Completed)
     } else if status_counter.shuffle == n_files {
         Some(JobStatus::Shuffle)
     } else if status_counter.pending == n_files {
         Some(JobStatus::Pending)
-    } else if status_counter.mapping <= n_files {
+    } else if (status_counter.shuffle > 0 && status_counter.complete == 0) && status_counter.mapping <= n_files {
         Some(JobStatus::MapPhase)
-    } else if status_counter.reducing <= n_files {
+    } else if status_counter.mapping == 0 && (status_counter.shuffle > 0 || status_counter.reducing > 0) {
         Some(JobStatus::ReducePhase)
     } else {
         // Should not be reached unless I'm tripping
         None
     }
 }
+
 #[tonic::async_trait]
 impl Coordinator for CoordinatorService {
 
@@ -303,7 +310,7 @@ impl Coordinator for CoordinatorService {
                             workload: job.job.workload.clone(),
                             output:  format!("/temp/{}/", job.id), //tmp file
                             args: job.job.args.join(" "),
-                            status: "Reduce".into(),
+                            status: "Map".into(),
                         };
                         let modified_job = Job {
                             id: job.id.clone(),
@@ -329,10 +336,11 @@ impl Coordinator for CoordinatorService {
                             new_status.clone()
                         );                        
                         let filename = job.files.lock().unwrap().get(0).unwrap().to_string().clone();
+                        println!("{}", &filename);
                         let task = Task {
-                            input: format!("/temp/{}/{}", job.id, filename), 
+                            input: filename.clone(), 
                             workload: job.job.workload.clone(),
-                            output: job.job.output.clone(), //tmp file
+                            output: format!("{}/", job.job.output.clone()),
                             args: job.job.args.join(" "),
                             status: "Reduce".into(),
                         };
@@ -351,21 +359,27 @@ impl Coordinator for CoordinatorService {
                     JobStatus::ReducePhase => {
                         
                         let mut input_file = job.file_status.lock().unwrap();
-
+                        let file = match get_next_file(&job.files.lock().unwrap(), &input_file) {
+                            Some(f) => f,
+                            None => { 
+                                let modified_job = job.clone();
+                                job_q.push_front(modified_job);
+                                return Err(Status::not_found("No job available"))
+                            }
+                        };
                         let new_status = FileStatus {
                             status: JobStatus::ReducePhase,
                             elapsed: now(),
                         };
                         input_file.insert(
-                            job.files.lock().unwrap().get(0).expect("Error: No file found in job.files").to_string().clone(),
+                            file.clone(),
                             new_status.clone()
                         );          
-                        let filename = job.files.lock().unwrap().get(0).unwrap().to_string().clone();
 
                         let task = Task {
-                            input: format!("/temp/{}/{}", job.id, filename), 
+                            input: file.clone(), 
                             workload: job.job.workload.clone(),
-                            output: job.job.output.clone(), 
+                            output: format!("{}/", job.job.output.clone()), 
                             args: job.job.args.join(" "),
                             status: "Reduce".into(),
                         };
@@ -527,7 +541,9 @@ impl Coordinator for CoordinatorService {
                 file_names.push(out_file.clone());
                 file_names.remove(file_index);
                 let next_job_state = check_all_file_states(&file_names, &file_status).unwrap();
+
                 if job.status.ne(&next_job_state) {
+                    println!("Changing job state to: {:?}", &next_job_state);
                     let modified_job = Job {
                         id: job.id.clone(),
                         status: next_job_state,
@@ -537,6 +553,7 @@ impl Coordinator for CoordinatorService {
                     };
                     job_q.push_front(modified_job);
                 } else {
+                    println!("Job is still {:?}", &job.status);
                     let modified_job = Job {
                         id: job.id.clone(),
                         status: job.status.clone(),
