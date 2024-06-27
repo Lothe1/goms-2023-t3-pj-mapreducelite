@@ -80,9 +80,9 @@ async fn reduce(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
     let object_name = &job.input;
     println!("{:?}", object_name);
 
-    let temp_path = format!("./_temp/{}", object_name);
-    let file = File::open(&temp_path)?;
-    let reader = io::BufReader::new(file);
+    // Fetch intermediate data from MinIO
+    let content = minio::get_object(&client, bucket_name, object_name).await?;
+    let reader = io::BufReader::new(content.as_bytes());
 
     let mut intermediate_data = HashMap::new();
     for line in reader.lines() {
@@ -109,17 +109,11 @@ async fn reduce(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
         output_data.push(KeyValue { key: Bytes::from(key.clone()), value: reduced_value });
     }
 
-
-    let _ = fs::create_dir_all("./_out")?;
     let filename = now();
-    // Store the reduced data back to S3 or final output location
-    let output_path = format!("./_out/{}", filename);
-    let mut file =  OpenOptions::new().write(true).create(true).open(&output_path)?;
-    let mut content = format!(""); 
+    let mut content = String::new(); 
 
     for kv in &output_data {
-        writeln!(file, "{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value))?;
-        content = format!("{content}\n{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value));
+        content.push_str(&format!("{}\t{}\n", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value)));
     }
 
     match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
