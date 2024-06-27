@@ -9,6 +9,8 @@ use tokio::time::sleep;
 use tonic::{Request, Response};
 use tonic::{transport::Server, Status};
 use tonic::transport::Channel;
+use std::fs::File;
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 // use std::io::{BufReader, Read};
@@ -24,26 +26,38 @@ mod mapreduce {
 use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse};
 use mapreduce::coordinator_client::CoordinatorClient;
 
-async fn map(
-    client: &Client,
-    job: &Job
-) -> Result<(), anyhow::Error> {
-    let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error");
+async fn map(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
+    let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error loading workload");
     let bucket_name = "mrl-lite";
     let object_name = &job.input;
     println!("{:?}", object_name);
-    match minio::get_object(&client, bucket_name, object_name).await {
-        Ok(content) => println!("{:?}", object_name),
-        Err(e) => eprintln!("Failed to get object: {:?}", e),
+
+    let content = minio::get_object(&client, bucket_name, object_name).await?;
+    let input_kv = KeyValue {
+        key: Bytes::from(object_name.clone()),
+        value: Bytes::from(content),
+    };
+
+    let serialized_args = Bytes::from(job.args.join(" "));
+    let map_func = engine.map_fn;
+
+    let mut intermediate_data = Vec::new();
+    for item in map_func(input_kv, serialized_args.clone())? {
+        let kv = item?;
+        intermediate_data.push(kv);
     }
-    // Do the mapping stuff :)
+
+    // Store intermediate data back to S3 or a temporary location
+    let temp_path = format!("/temp/{}", job.output);
+    let mut file = File::create(&temp_path)?;
+    for kv in &intermediate_data {
+        writeln!(file, "{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value))?;
+    }
+
     Ok(())
 }
 
-async fn reduce(
-    client: &Client,
-    job: &Job
-) -> Result<(), anyhow::Error> {
+async fn reduce(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
@@ -95,9 +109,12 @@ async fn reduce(
 async fn main() -> Result<(), Box<dyn std::error::Error>>{
     print!("Hello worker!\n");
 
+    // Parse command line arguments
     let args = Args::parse();
     let ip = args.join; 
     print!("IP to join: {}", ip);
+
+    // Connect to coordinator
     let mut client = CoordinatorClient::connect(format!("http://{}", ip)).await.unwrap();
 
     // Register with coordinator
@@ -123,15 +140,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                 let task = response.into_inner();
                 println!("Received task: {:?}", task);
 
+                let job = Job {
+                    input: task.input.clone(),
+                    workload: task.workload.clone(),
+                    output: task.output.clone(),
+                    args: task.args.clone().split_whitespace().map(String::from).collect(),
+                };
+
                 // Process task based on its type
                 match task.status.as_str() {
                     "Map" => {
-                        if let Err(err) = map(&s3_client, &task).await {
+                        if let Err(err) = map(&s3_client, &job).await {
                             eprintln!("Error during map task: {:?}", err);
                         }
                     }
                     "Reduce" => {
-                        if let Err(err) = reduce(&s3_client, &task).await {
+                        if let Err(err) = reduce(&s3_client, &job).await {
                             eprintln!("Error during reduce task: {:?}", err);
                         }
                     }
@@ -140,7 +164,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                     }
                 }
 
-                // Report task completion
+                // Report task completion to coordinator
                 let report = Request::new(WorkerReport {
                     task: task.status,
                     input: task.input,
@@ -150,37 +174,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                     eprintln!("Error reporting task completion: {:?}", err);
                 }
             }
-            Err(err) => {
-                eprintln!("Error receiving task: {:?}", err);
+            Err(status) => {
+                eprintln!("Error receiving task: {:?}", status);
+                // Sleep before retrying
+                sleep(Duration::from_secs(1)).await;
             }
-        } 
+        }
+
         // Sleep for a short period before checking for the next task
         sleep(Duration::from_secs(1)).await;
-    }
-
-    async fn map(client: &Client, task: &Task) -> Result<(), anyhow::Error> {
-        println!("Executing map task for input: {}", task.input);
-        let job = Job {
-            input: task.input.clone(),
-            workload: task.workload.clone(),
-            output: task.output.clone(),
-            args: Vec::new()
-        };
-        let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error");
-        let bucket_name = "mrl-lite";
-        let object_name = &job.input;
-        println!("{:?}", object_name);
-        match minio::get_object(&client, bucket_name, object_name).await {
-            Ok(content) => println!("{:?}", object_name),
-            Err(e) => eprintln!("Failed to get object: {:?}", e),
-        }
-        // Do the mapping stuff :)
-        Ok(())
-    }
-
-    async fn reduce(client: &Client, task: &Task) -> Result<(), anyhow::Error> {
-        println!("Executing reduce task for input: {}", task.input);
-        Ok(())
     }
 
     // // Listen for tasks
