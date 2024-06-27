@@ -303,7 +303,7 @@ impl Coordinator for CoordinatorService {
                             workload: job.job.workload.clone(),
                             output:  format!("/temp/{}/", job.id), //tmp file
                             args: job.job.args.join(" "),
-                            status: "Map".into(),
+                            status: "Reduce".into(),
                         };
                         let modified_job = Job {
                             id: job.id.clone(),
@@ -318,7 +318,6 @@ impl Coordinator for CoordinatorService {
                     }
                     JobStatus::Shuffle => {
                         // If the JobStatus is in shuffle, then we need to read the temp filenames in S3 again
-
                         let mut input_file = job.file_status.lock().unwrap();
 
                         let new_status = FileStatus {
@@ -335,7 +334,7 @@ impl Coordinator for CoordinatorService {
                             workload: job.job.workload.clone(),
                             output: job.job.output.clone(), //tmp file
                             args: job.job.args.join(" "),
-                            status: "Map".into(),
+                            status: "Reduce".into(),
                         };
                         let modified_job = Job {
                             id: job.id.clone(),
@@ -352,15 +351,21 @@ impl Coordinator for CoordinatorService {
                     JobStatus::ReducePhase => {
                         
                         let mut input_file = job.file_status.lock().unwrap();
+
                         let new_status = FileStatus {
                             status: JobStatus::ReducePhase,
                             elapsed: now(),
                         };
-                        input_file.insert(job.files.lock().unwrap().get(0).unwrap().to_string().clone(), new_status.clone());
+                        input_file.insert(
+                            job.files.lock().unwrap().get(0).expect("Error: No file found in job.files").to_string().clone(),
+                            new_status.clone()
+                        );          
+                        let filename = job.files.lock().unwrap().get(0).unwrap().to_string().clone();
+
                         let task = Task {
-                            input: job.files.lock().unwrap().get(0).unwrap().to_string().clone(), 
+                            input: format!("/temp/{}/{}", job.id, filename), 
                             workload: job.job.workload.clone(),
-                            output: "/temp/".into(), 
+                            output: job.job.output.clone(), 
                             args: job.job.args.join(" "),
                             status: "Reduce".into(),
                         };
