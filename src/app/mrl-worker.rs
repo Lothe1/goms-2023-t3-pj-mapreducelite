@@ -1,5 +1,6 @@
 // use anyhow::*;
 #![ allow(warnings)]
+use cmd::coordinator::now;
 use itertools::Itertools;
 use mrlite::*;
 use bytes::Bytes;
@@ -10,7 +11,7 @@ use tonic::{Request, Response};
 use tonic::{transport::Server, Status};
 use tonic::transport::Channel;
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write, BufRead};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -38,7 +39,7 @@ async fn map(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
         key: Bytes::from(object_name.clone()),
         value: Bytes::from(content),
     };
-
+    // println!("{:?}", input_kv.key);
     let serialized_args = Bytes::from(job.args.join(" "));
     let map_func = engine.map_fn;
 
@@ -47,12 +48,27 @@ async fn map(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
         let kv = item?;
         intermediate_data.push(kv);
     }
+    // println!("{:?}", intermediate_data); // works here
 
     // Store intermediate data back to S3 or a temporary location
-    let temp_path = format!("/temp/{}", job.output);
-    let mut file = File::create(&temp_path)?;
+    let _ = fs::create_dir_all("./_temp")?;
+    let filename = now();
+    let temp_path = format!("./_temp/{}.txt", filename);
+    // println!("{:?}", temp_path);
+    let mut file_res = OpenOptions::new().write(true).create(true).open(&temp_path); //File::create(&temp_path)?;
+    // println!("{:?}", file_res);
+    let mut file = file_res.unwrap();
+    // println!("File created!");
+    let mut content = format!(""); 
     for kv in &intermediate_data {
+        // println!("{:?}", &kv.value);
         writeln!(file, "{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value))?;
+        content = format!("{content}\n{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value));
+    }
+
+    match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
+        Ok(_) => println!("Uploaded"),
+        Err(e) => eprintln!("Failed to upload: {:?}", e),
     }
 
     Ok(())
@@ -64,7 +80,7 @@ async fn reduce(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
     let object_name = &job.input;
     println!("{:?}", object_name);
 
-    let temp_path = format!("/temp/{}", object_name);
+    let temp_path = format!("./_temp/{}", object_name);
     let file = File::open(&temp_path)?;
     let reader = io::BufReader::new(file);
 
@@ -92,6 +108,7 @@ async fn reduce(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
         let reduced_value = reduce_func(Bytes::from(key.clone()), value_iter, serialized_args.clone())?;
         output_data.push(KeyValue { key: Bytes::from(key.clone()), value: reduced_value });
     }
+
 
     // Store the reduced data back to S3 or final output location
     let output_path = format!("/output/{}", job.output);
