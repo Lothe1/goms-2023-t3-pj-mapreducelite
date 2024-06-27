@@ -216,16 +216,19 @@ impl Coordinator for CoordinatorService {
     // This function is called when a worker node wants to register itself with the coordinator. 
     // When a worker starts up, it should send a registration request to the coordinator to announce its availability for task assignments
     async fn register_worker(&self, request: Request<WorkerRegistration>) -> Result<Response<WorkerResponse>, Status> {
+        let worker_addr = request.remote_addr().ok_or_else(|| Status::unknown("No remote address"))?;
         let worker = WorkerNode {
             state: WorkerState::Idle,
-            addr: request.remote_addr().unwrap(),
+            addr: worker_addr,
         };
         println!("New worker joined at {:?}", worker.addr.to_string());
         let mut args: HashMap<String, String> = HashMap::new();
         args.insert("ip".into(), self.os_ip.clone());
         args.insert("user".into(), self.os_user.clone());
         args.insert("pw".into(), self.os_pw.clone());
-        self.workers.lock().unwrap().push(worker);
+        let mut workers = self.workers.lock().unwrap_or_else(|e| e.into_inner());
+        workers.push(worker);
+
         Ok(Response::new(WorkerResponse {
             success: true,
             message: "Worker registered".into(),
@@ -238,7 +241,7 @@ impl Coordinator for CoordinatorService {
     // This function is called by a worker node when it requests a task from the coordinator. 
     // Once a worker is registered and ready to perform work, it will periodically request tasks from the coordinator to execute
     async fn get_task(&self, _request: Request<WorkerRequest>) -> Result<Response<Task>, Status> {
-        let mut job_q = self.job_queue.lock().unwrap();
+        let mut job_q = self.job_queue.lock().unwrap_or_else(|e| e.into_inner());
         // let job_option = self.job_queue.lock().unwrap().pop_front();
         match job_q.pop_front() {
             Some(job) => {
@@ -253,7 +256,10 @@ impl Coordinator for CoordinatorService {
                             status: JobStatus::MapPhase,
                             elapsed: now(),
                         };
-                        input_file.insert( job.files.get(0).unwrap().to_string().clone(), new_status.clone());
+                        input_file.insert(
+                            job.files.get(0).expect("Error: No file found in job.files").to_string().clone(),
+                            new_status.clone()
+                        );                        
 
                         let task = Task {
                             input: job.files.get(0).unwrap().to_string().clone(), 
