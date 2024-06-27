@@ -53,7 +53,7 @@ async fn map(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
     // Store intermediate data back to S3 or a temporary location
     let _ = fs::create_dir_all("./_temp")?;
     let filename = now();
-    let temp_path = format!("./_temp/{}.txt", filename);
+    let temp_path = format!("./_temp/{}", filename);
     // println!("{:?}", temp_path);
     let mut file_res = OpenOptions::new().write(true).create(true).open(&temp_path); //File::create(&temp_path)?;
     // println!("{:?}", file_res);
@@ -110,58 +110,25 @@ async fn reduce(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
     }
 
 
+    let _ = fs::create_dir_all("./_out")?;
+    let filename = now();
     // Store the reduced data back to S3 or final output location
-    let output_path = format!("/output/{}", job.output);
-    let mut file = File::create(&output_path)?;
+    let output_path = format!("./_out/{}", filename);
+    let mut file =  OpenOptions::new().write(true).create(true).open(&output_path)?;
+    let mut content = format!(""); 
+
     for kv in &output_data {
         writeln!(file, "{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value))?;
+        content = format!("{content}\n{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value));
     }
+
+    match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
+        Ok(_) => println!("Uploaded"),
+        Err(e) => eprintln!("Failed to upload: {:?}", e),
+    }
+
     Ok(())
 }
-
-// pub fn perform_map(
-//     job: &Job,
-//     engine: &Workload,
-//     serialized_args: &Bytes,
-//     num_reduce_worker: u32,
-// ) -> Result<Buckets> {
-//     // Iterator going through all files in the input file path, precisely, input/*
-//     let input_files = glob(&job.input)?;
-//     let buckets: Buckets = Buckets::new();
-//     for pathspec in input_files.flatten() {
-//         let mut buf = Vec::new();
-//         {
-//             // a scope so that the file is closed right after reading
-//             let mut file = File::open(&pathspec)?;
-//             // Reads the input file completely and stores in buf
-//             file.read_to_end(&mut buf)?;
-//         }
-//         // Converts to Bytes
-//         let buf = Bytes::from(buf);
-//         let filename = pathspec.to_str().unwrap_or("unknown").to_string();
-//         // Stores the data read from each file as <Filename, All data in file>
-//         let input_kv = KeyValue {
-//             key: Bytes::from(filename),
-//             value: buf,
-//         };
-//         let map_func = engine.map_fn;
-//         // For each <key, value> object that has been mapped by the map function,
-//         // create a KeyValue object, and insert the KeyValue object into a bucket
-//         // according to the hashed value (mod # workers)
-//         for item in map_func(input_kv, serialized_args.clone())? {
-//             let KeyValue { key, value } = item?;
-//             let bucket_no = ihash(&key) % num_reduce_worker;
-
-//             #[allow(clippy::unwrap_or_default)]
-//             buckets
-//                 .entry(bucket_no)
-//                 .or_insert(Vec::new())
-//                 .push(KeyValue { key, value });
-//         }
-//     }
-
-//     Ok(buckets)
-// }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
