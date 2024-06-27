@@ -59,7 +59,7 @@ struct Job {
     id: String,
     status: JobStatus,
     job: standalone::Job,
-    files: Vec<String>,
+    files: Arc<Mutex<Vec<String>>>,
     file_status: Arc<Mutex<HashMap<String, FileStatus>>>,
 }
 
@@ -154,6 +154,10 @@ fn next_state(file: &String, file_status: &HashMap<String, FileStatus>) -> Optio
     }
 }
 
+fn get_file_index(file: &str, files: &Vec<String>) -> usize {
+    files.iter().position(|f| f==file).unwrap()
+}
+
 /// Used to check the status of a job and possibly inform whether or not 
 /// the job's status can be changed to the next level.
 fn check_all_file_states(files: &Vec<String>, file_status: &HashMap<String, FileStatus>) -> Option<JobStatus> {
@@ -242,29 +246,25 @@ impl Coordinator for CoordinatorService {
     // Once a worker is registered and ready to perform work, it will periodically request tasks from the coordinator to execute
     async fn get_task(&self, _request: Request<WorkerRequest>) -> Result<Response<Task>, Status> {
         let mut job_q = self.job_queue.lock().unwrap_or_else(|e| e.into_inner());
-        // let job_option = self.job_queue.lock().unwrap().pop_front();
         match job_q.pop_front() {
             Some(job) => {
                 match job.status {
                     JobStatus::Pending => {
                         // pick first file -> change job's status to MapPhase
-                        // println!("{:?}", job.files);
                         let mut input_file = job.file_status.lock().unwrap();
-                        // println!("{:?}", input_file);
-                        // println!("{:?}", job.files);
                         let new_status = FileStatus {
                             status: JobStatus::MapPhase,
                             elapsed: now(),
                         };
                         input_file.insert(
-                            job.files.get(0).expect("Error: No file found in job.files").to_string().clone(),
+                            job.files.lock().unwrap().get(0).expect("Error: No file found in job.files").to_string().clone(),
                             new_status.clone()
                         );                        
 
                         let task = Task {
-                            input: job.files.get(0).unwrap().to_string().clone(), 
+                            input: job.files.lock().unwrap().get(0).unwrap().to_string().clone(), 
                             workload: job.job.workload.clone(),
-                            output: "/temp/".into(), //tmp file
+                            output: format!("/temp/{}/", job.id), //tmp file
                             args: job.job.args.join(" "),
                             status: "Map".into(),
                         };
@@ -277,13 +277,14 @@ impl Coordinator for CoordinatorService {
                         };
                         job_q.push_front(modified_job);
                         // job.status = JobStatus::MapPhase;
-                        println!("Gave a pending task");
+                        println!("Gave a pending task for mapping");
                         return Ok(Response::new(task))
                     }
                     JobStatus::MapPhase => {
                         let mut input_file = job.file_status.lock().unwrap();
+                        let file_names = job.files.lock().unwrap();
                         // let opt_file = get_next_file(&job.files, &input_file);
-                        let file = match get_next_file(&job.files, &input_file) {
+                        let file = match get_next_file(&file_names, &input_file) {
                             Some(f) => f,
                             None => { 
                                 let modified_job = job.clone();
@@ -291,8 +292,6 @@ impl Coordinator for CoordinatorService {
                                 return Err(Status::not_found("No job available"))
                             }
                         };
-                        // println!("{:?}", input_file);
-                        // println!("{:?}", job.files);
                         let new_status = FileStatus {
                             status: JobStatus::MapPhase,
                             elapsed: now(),
@@ -302,7 +301,7 @@ impl Coordinator for CoordinatorService {
                         let task = Task {
                             input: file.clone(), 
                             workload: job.job.workload.clone(),
-                            output: "/temp/".into(), //tmp file
+                            output:  format!("/temp/{}/", job.id), //tmp file
                             args: job.job.args.join(" "),
                             status: "Map".into(),
                         };
@@ -318,31 +317,37 @@ impl Coordinator for CoordinatorService {
                         return Ok(Response::new(task))
                     }
                     JobStatus::Shuffle => {
-                        
-                        job_q.push_front(job);
-                        println!("Gave a pending task");
+                        // If the JobStatus is in shuffle, then we need to read the temp filenames in S3 again
 
-                        return Err(Status::not_found("Not implemented"))
+                        let mut input_file = job.file_status.lock().unwrap();
 
-                        // let input_file = job.file_status.lock().unwrap();
-                        // let task = Task {
-                        //     input: job.files.iter().join(","),
-                        //     workload: job.files.get(0).unwrap().to_string().clone(),
-                        //     output: "/temp/".into(),
-                        //     args: job.job.args.join(" "),
-                        //     status: "Shuffle".into(),
-                        // };
-                        // let modified_job = Job {
-                        //     id: job.id.clone(),
-                        //     status: JobStatus::ReducePhase,
-                        //     job: job.job.clone(),
-                        //     files: job.files.clone(),
-                        //     file_status: Arc::new(Mutex::new(input_file.clone())),
-                        // };
-                        // job_q.push_front(modified_job);
-                        // println!("Gave a shuffle task");
-                        // return Ok(Response::new(task));
+                        let new_status = FileStatus {
+                            status: JobStatus::ReducePhase,
+                            elapsed: now(),
+                        };
+                        input_file.insert(
+                            job.files.lock().unwrap().get(0).expect("Error: No file found in job.files").to_string().clone(),
+                            new_status.clone()
+                        );                        
+                        let filename = job.files.lock().unwrap().get(0).unwrap().to_string().clone();
+                        let task = Task {
+                            input: format!("/temp/{}/{}", job.id, filename), 
+                            workload: job.job.workload.clone(),
+                            output: job.job.output.clone(), //tmp file
+                            args: job.job.args.join(" "),
+                            status: "Map".into(),
+                        };
+                        let modified_job = Job {
+                            id: job.id.clone(),
+                            status: JobStatus::ReducePhase,
+                            job: job.job.clone(),
+                            files: job.files.clone(),
+                            file_status: Arc::new(Mutex::new(input_file.clone())),
+                        };
+                        job_q.push_front(modified_job);
+                        println!("Gave a pending task for reducing");
 
+                        return Ok(Response::new(task))
                     }
                     JobStatus::ReducePhase => {
                         
@@ -351,9 +356,9 @@ impl Coordinator for CoordinatorService {
                             status: JobStatus::ReducePhase,
                             elapsed: now(),
                         };
-                        input_file.insert(job.files.get(0).unwrap().to_string().clone(), new_status.clone());
+                        input_file.insert(job.files.lock().unwrap().get(0).unwrap().to_string().clone(), new_status.clone());
                         let task = Task {
-                            input: job.files.get(0).unwrap().to_string().clone(), 
+                            input: job.files.lock().unwrap().get(0).unwrap().to_string().clone(), 
                             workload: job.job.workload.clone(),
                             output: "/temp/".into(), 
                             args: job.job.args.join(" "),
@@ -430,7 +435,7 @@ impl Coordinator for CoordinatorService {
             status: JobStatus::Pending,
             job: standalone_job, 
             // engine: wl,
-            files: list_input_files.clone(),
+            files: Arc::new(Mutex::new(list_input_files.clone())),
             file_status: Arc::new(Mutex::new(input_files)),
         };
 
@@ -475,7 +480,7 @@ impl Coordinator for CoordinatorService {
         let mut jobs = Vec::new();
         for job in job_q.iter() {
             let task = Task {
-                input: job.files.iter().join(","),
+                input: job.files.lock().unwrap().iter().join(","),
                 workload: job.job.workload.clone(),
                 output: job.job.output.clone(),
                 args: job.job.args.join(" "),
@@ -494,26 +499,35 @@ impl Coordinator for CoordinatorService {
     /// gRPC call for workers to inform the coordinator that they have finished
     /// a task on the file given to them.
     async fn report_task(&self, request: Request<WorkerReport>) -> Result<Response<WorkerResponse>, Status> {
+        println!("Worker reporting completion");
         let completed_file = request.get_ref().input.clone();
+        let out_file = request.get_ref().output.clone();
         let mut job_q = self.job_queue.lock().unwrap();
         // If the file status is currently in MapPhase -> change file state to Shuffle
         // If the file status is currently in ReducePhase -> change file state to Completed
         match job_q.pop_front() {
             Some(job) => {
+                let in_files = job.files.lock().unwrap();
+                let mut file_names = in_files.clone();
                 let mut file_status = job.file_status.lock().unwrap();
                 let next_file_state = next_state(&completed_file, &file_status);
+                let next_state = next_file_state.unwrap();
                 let new_status = FileStatus {
-                    status: next_file_state.unwrap(),
+                    status: next_state.clone(),
                     elapsed: 0,
                 };
-                file_status.insert(completed_file.clone(), new_status);
-                let next_job_state = check_all_file_states(&job.files, &file_status).unwrap();
+                let file_index = get_file_index(&completed_file, &in_files);
+                file_status.insert(out_file.clone(), new_status);
+                file_status.remove(&completed_file);
+                file_names.push(out_file.clone());
+                file_names.remove(file_index);
+                let next_job_state = check_all_file_states(&file_names, &file_status).unwrap();
                 if job.status.ne(&next_job_state) {
                     let modified_job = Job {
                         id: job.id.clone(),
                         status: next_job_state,
                         job: job.job.clone(),
-                        files: job.files.clone(),
+                        files: Arc::new(Mutex::new(file_names.clone())),
                         file_status: Arc::new(Mutex::new(file_status.clone())),
                     };
                     job_q.push_front(modified_job);
@@ -522,7 +536,7 @@ impl Coordinator for CoordinatorService {
                         id: job.id.clone(),
                         status: job.status.clone(),
                         job: job.job.clone(),
-                        files: job.files.clone(),
+                        files: Arc::new(Mutex::new(file_names.clone())),
                         file_status: Arc::new(Mutex::new(file_status.clone())),
                     };
                     job_q.push_front(modified_job);
