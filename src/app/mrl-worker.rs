@@ -9,8 +9,9 @@ use tokio::time::sleep;
 use tonic::{Request, Response};
 use tonic::{transport::Server, Status};
 use tonic::transport::Channel;
+use std::collections::HashMap;
 use std::fs::File;
-use std::io::Write;
+use std::io::{self, Write, BufRead};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 // use std::io::{BufReader, Read};
@@ -27,7 +28,7 @@ use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerReques
 use mapreduce::coordinator_client::CoordinatorClient;
 
 async fn map(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
-    let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error loading workload");
+    let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
     let bucket_name = "mrl-lite";
     let object_name = &job.input;
     println!("{:?}", object_name);
@@ -58,6 +59,46 @@ async fn map(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
 }
 
 async fn reduce(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
+    let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error loading workload");
+    let bucket_name = "mrl-lite";
+    let object_name = &job.input;
+    println!("{:?}", object_name);
+
+    let temp_path = format!("/temp/{}", object_name);
+    let file = File::open(&temp_path)?;
+    let reader = io::BufReader::new(file);
+
+    let mut intermediate_data = HashMap::new();
+    for line in reader.lines() {
+        let line = line?;
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() == 2 {
+            let key = parts[0].to_string();
+            let value = parts[1].to_string();
+            intermediate_data.entry(key).or_insert_with(Vec::new).push(value);
+        }
+    }
+
+    let mut output_data = Vec::new();
+    let serialized_args = Bytes::from(job.args.join(" "));
+    let reduce_func = engine.reduce_fn;
+    for (key, values) in intermediate_data {        
+        let kv = KeyValue {
+            key: Bytes::from(key.clone()),
+            value: Bytes::from(values.join(",")),
+        };
+        
+        let value_iter = Box::new(values.into_iter().map(Bytes::from));
+        let reduced_value = reduce_func(Bytes::from(key.clone()), value_iter, serialized_args.clone())?;
+        output_data.push(KeyValue { key: Bytes::from(key.clone()), value: reduced_value });
+    }
+
+    // Store the reduced data back to S3 or final output location
+    let output_path = format!("/output/{}", job.output);
+    let mut file = File::create(&output_path)?;
+    for kv in &output_data {
+        writeln!(file, "{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value))?;
+    }
     Ok(())
 }
 
@@ -106,7 +147,7 @@ async fn reduce(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
 // }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>>{
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!("Hello worker!\n");
 
     // Parse command line arguments
@@ -176,8 +217,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
             }
             Err(status) => {
                 eprintln!("Error receiving task: {:?}", status);
-                // Sleep before retrying
-                sleep(Duration::from_secs(1)).await;
+                sleep(Duration::from_secs(1)).await; // Sleep before retrying
             }
         }
 
