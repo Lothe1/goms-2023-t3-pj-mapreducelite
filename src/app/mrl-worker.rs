@@ -28,7 +28,8 @@ mod mapreduce {
 
 use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse};
 use mapreduce::coordinator_client::CoordinatorClient;
-use mrlite::Encode::encode_decode::{append_parquet, make_writer};
+use mrlite::Encode::encode_decode::{append_parquet, KeyValueList_to_KeyListandValueList, make_writer};
+use mrlite::S3::minio::{upload_parts};
 
 async fn map(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
@@ -138,8 +139,6 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     Ok(filename.to_string())
 }
 
-
-
 async fn map_v2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
     let bucket_name = "mrl-lite";
@@ -167,26 +166,87 @@ async fn map_v2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let filename = now();
     let temp_path = format!("./_temp/{}", filename);
     // println!("{:?}", temp_path);
-    let mut file_res = OpenOptions::new().write(true).create(true).open(&temp_path); //File::create(&temp_path)?;
+    let mut file_res = OpenOptions::new().write(true).create(true).open(temp_path.clone()); //File::create(&temp_path)?;
     // println!("{:?}", file_res);
     let mut file = file_res.unwrap();
     // println!("File created!");
 
     let mut writer = make_writer(&mut file);
-    let (keys, values) = intermediate_data.into_iter().unzip();
-    append_parquet(&file, &mut writer, keys, values).unwrap();
+
+    let (keys, values) = KeyValueList_to_KeyListandValueList(intermediate_data);
+    append_parquet(&file, &mut writer, keys, values);
 
     writer.close().unwrap();
 
+    upload_parts(&client, bucket_name, temp_path.as_str()).await.expect("TODO: panic message");
 
+    Ok(temp_path.to_string())
+}
+
+async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
+    let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error loading workload");
+    let bucket_name = "mrl-lite";
+    let object_name = &job.input;
+    println!("{:?}", object_name);
+
+    // Fetch intermediate data from MinIO
+    let content = minio::get_object(&client, bucket_name, object_name).await?;
+
+    let reader = io::BufReader::new(content.as_bytes());
+
+    // Intermediate data storage
+    let mut intermediate_data = HashMap::new();
+
+    // Read and parse intermediate data
+    for line in reader.lines() {
+        let line = line?;
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() == 2 {
+            let key = parts[0].to_string();
+            let value = parts[1].to_string();
+            intermediate_data.entry(key).or_insert_with(Vec::new).push(value);
+        }
+    }
+
+    // Sort intermediate data by key
+    let mut sorted_intermediate_data: Vec<(String, Vec<String>)> = intermediate_data.into_iter().collect();
+    sorted_intermediate_data.sort_by(|a, b| a.0.cmp(&b.0));
+
+    // Reduce intermediate data
+    let mut output_data = Vec::new();
+    let serialized_args = Bytes::from(job.args.join(" "));
+    let reduce_func = engine.reduce_fn;
+
+    for (key, values) in sorted_intermediate_data {
+        let kv = KeyValue {
+            key: Bytes::from(key.clone()),
+            value: Bytes::from(values.join(",")),
+        };
+
+        let value_iter = Box::new(values.into_iter().map(Bytes::from));
+        let reduced_value = reduce_func(Bytes::from(key.clone()), value_iter, serialized_args.clone())?;
+        output_data.push(KeyValue { key: Bytes::from(key.clone()), value: reduced_value });
+    }
+
+    // Prepare and upload the final output
+    let filename = now();
+    let mut content = String::new();
+
+    for kv in &output_data {
+        // println!("k: {:?} || v: {}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value));
+        content.push_str(&format!("{}\t{}\n", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value)));
+    }
 
     match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
-        Ok(_) => println!("Uploaded"),
+        Ok(_) => println!("Uploaded to {}{}", job.output, filename),
         Err(e) => eprintln!("Failed to upload: {:?}", e),
     }
 
     Ok(filename.to_string())
 }
+
+
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
