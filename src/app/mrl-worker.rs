@@ -167,6 +167,7 @@ async fn map2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let temp_path = format!("/_temp/{}", filename);
     // println!("{:?}", temp_path);
     let mut file_res = OpenOptions::new().write(true).create(true).open(&format!(".{temp_path}")); //File::create(&temp_path)?;
+
     // println!("{:?}", file_res);
     let mut file = file_res.unwrap();
     // println!("File created!");
@@ -180,7 +181,7 @@ async fn map2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
 
     upload_parts(&client, bucket_name, &temp_path).await.unwrap();
 
-    Ok(filename.to_string())
+    Ok(temp_path.to_string())
 }
 
 async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
