@@ -6,6 +6,7 @@ use mrlite::*;
 use bytes::Bytes;
 use clap::Parser;
 use cmd::worker::Args;
+use prost::Name;
 use tokio::time::sleep;
 use tonic::{Request, Response};
 use tonic::{transport::Server, Status};
@@ -28,7 +29,7 @@ mod mapreduce {
 use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse};
 use mapreduce::coordinator_client::CoordinatorClient;
 
-async fn map(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
+async fn map(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
     let bucket_name = "mrl-lite";
     let object_name = &job.input;
@@ -53,7 +54,7 @@ async fn map(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
     // Store intermediate data back to S3 or a temporary location
     let _ = fs::create_dir_all("./_temp")?;
     let filename = now();
-    let temp_path = format!("./_temp/{}.txt", filename);
+    let temp_path = format!("./_temp/{}", filename);
     // println!("{:?}", temp_path);
     let mut file_res = OpenOptions::new().write(true).create(true).open(&temp_path); //File::create(&temp_path)?;
     // println!("{:?}", file_res);
@@ -71,18 +72,18 @@ async fn map(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
         Err(e) => eprintln!("Failed to upload: {:?}", e),
     }
 
-    Ok(())
+    Ok(filename.to_string())
 }
 
-async fn reduce(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
+async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error loading workload");
     let bucket_name = "mrl-lite";
     let object_name = &job.input;
     println!("{:?}", object_name);
 
-    let temp_path = format!("./_temp/{}", object_name);
-    let file = File::open(&temp_path)?;
-    let reader = io::BufReader::new(file);
+    // Fetch intermediate data from MinIO
+    let content = minio::get_object(&client, bucket_name, object_name).await?;
+    let reader = io::BufReader::new(content.as_bytes());
 
     let mut intermediate_data = HashMap::new();
     for line in reader.lines() {
@@ -109,59 +110,21 @@ async fn reduce(client: &Client, job: &Job) -> Result<(), anyhow::Error> {
         output_data.push(KeyValue { key: Bytes::from(key.clone()), value: reduced_value });
     }
 
+    let filename = now();
+    let mut content = String::new(); 
 
-    // Store the reduced data back to S3 or final output location
-    let output_path = format!("/output/{}", job.output);
-    let mut file = File::create(&output_path)?;
     for kv in &output_data {
-        writeln!(file, "{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value))?;
+        // println!("k: {:?} || v: {}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value));
+        content.push_str(&format!("{}", String::from_utf8_lossy(&kv.value)));
     }
-    Ok(())
+
+    match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
+        Ok(_) => println!("Uploaded to {}{}", job.output, filename),
+        Err(e) => eprintln!("Failed to upload: {:?}", e),
+    }
+
+    Ok(filename.to_string())
 }
-
-// pub fn perform_map(
-//     job: &Job,
-//     engine: &Workload,
-//     serialized_args: &Bytes,
-//     num_reduce_worker: u32,
-// ) -> Result<Buckets> {
-//     // Iterator going through all files in the input file path, precisely, input/*
-//     let input_files = glob(&job.input)?;
-//     let buckets: Buckets = Buckets::new();
-//     for pathspec in input_files.flatten() {
-//         let mut buf = Vec::new();
-//         {
-//             // a scope so that the file is closed right after reading
-//             let mut file = File::open(&pathspec)?;
-//             // Reads the input file completely and stores in buf
-//             file.read_to_end(&mut buf)?;
-//         }
-//         // Converts to Bytes
-//         let buf = Bytes::from(buf);
-//         let filename = pathspec.to_str().unwrap_or("unknown").to_string();
-//         // Stores the data read from each file as <Filename, All data in file>
-//         let input_kv = KeyValue {
-//             key: Bytes::from(filename),
-//             value: buf,
-//         };
-//         let map_func = engine.map_fn;
-//         // For each <key, value> object that has been mapped by the map function,
-//         // create a KeyValue object, and insert the KeyValue object into a bucket
-//         // according to the hashed value (mod # workers)
-//         for item in map_func(input_kv, serialized_args.clone())? {
-//             let KeyValue { key, value } = item?;
-//             let bucket_no = ihash(&key) % num_reduce_worker;
-
-//             #[allow(clippy::unwrap_or_default)]
-//             buckets
-//                 .entry(bucket_no)
-//                 .or_insert(Vec::new())
-//                 .push(KeyValue { key, value });
-//         }
-//     }
-
-//     Ok(buckets)
-// }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -206,30 +169,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 // Process task based on its type
-                match task.status.as_str() {
+                let out_fn = match task.status.as_str() {
                     "Map" => {
-                        if let Err(err) = map(&s3_client, &job).await {
-                            eprintln!("Error during map task: {:?}", err);
+                        match map(&s3_client, &job).await {
+                            Ok(name) => Some(name),
+                            Err(err) => {
+                                eprintln!("Error during map task: {:?}", err);
+                                None
+                            }
                         }
                     }
                     "Reduce" => {
-                        if let Err(err) = reduce(&s3_client, &job).await {
-                            eprintln!("Error during reduce task: {:?}", err);
+                        match reduce(&s3_client, &job).await {
+                            Ok(name) => Some(name),
+                            Err(err) => {
+                                eprintln!("Error during reduce task: {:?}", err);
+                                None
+                            }
                         }
                     }
                     _ => {
                         eprintln!("Invalid task status received: {}", task.status);
+                        None
                     }
-                }
+                };
 
-                // Report task completion to coordinator
-                let report = Request::new(WorkerReport {
-                    task: task.status,
-                    input: task.input,
-                    output: task.output,
-                });
-                if let Err(err) = client.report_task(report).await {
-                    eprintln!("Error reporting task completion: {:?}", err);
+                if out_fn.is_some() {
+                    // Report task completion to coordinator
+                    let report = Request::new(WorkerReport {
+                        task: task.status,
+                        input: task.input,
+                        output: format!("{}{}", task.output, out_fn.unwrap()),
+                    });
+                    if let Err(err) = client.report_task(report).await {
+                        eprintln!("Error reporting task completion: {:?}", err);
+                    }
                 }
             }
             Err(status) => {
@@ -241,56 +215,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Sleep for a short period before checking for the next task
         sleep(Duration::from_secs(1)).await;
     }
-
-    // // Listen for tasks
-    // loop {
-    //     println!("Sending a request for a job!");
-    //     let resp = client.get_task(Request::new(WorkerRequest {  })).await;
-    //     match resp {
-    //         Ok(t) => {
-    //             let task = t.into_inner();
-    //             let job = Job {
-    //                 input: task.input.clone(),
-    //                 workload: task.workload.clone(),
-    //                 output: task.output.clone(),
-    //                 args: Vec::new()
-    //             };
-    //             let _ = sleep(Duration::from_secs(1)).await;
-    //             // if it is a mapPhase -> call map
-    //             // if it is a ReducePhase -> call reduce
-    //             let task_complete = match task.status.clone() {
-    //                 s if s==format!("Map") => {
-    //                     map(&s3_client, &job).await
-    //                 }
-    //                 s if s==format!("Reduce") => {
-    //                     reduce(&s3_client, &job).await
-    //                 }
-    //                 _ => {
-    //                     // should not reach here
-    //                     eprintln!("Invalid task assigned!");
-    //                     map(&s3_client, &job).await
-    //                 }
-    //             };
-    //             match task_complete {
-    //                 Ok(_) => {
-    //                     client.report_task(Request::new(WorkerReport { 
-    //                         task: task.status.clone(),
-    //                         input: task.input.clone(),
-    //                         output: task.output.clone(),
-    //                     })).await;
-    //                 }
-    //                 Err(err) => {
-    //                     // should not occur.... just saying :/
-    //                     eprintln!("{:?}", err)
-    //                 }
-    //             }
-    //         }
-    //         Err(e) => {
-    //             // no task
-    //             let _ = sleep(Duration::from_secs(1)).await;
-    //         }
-    //     }
-    // }
 }
 
 /* 
