@@ -157,107 +157,6 @@ fn combine_parquets(input_files: Vec<&str>, output_file: &str) -> (){
 }
 
 
-//filename has to be the same name as upload to s3
-pub async fn upload_parts(client: &Client, bucket: &str, filename: &str)-> Result<(), Box<dyn std::error::Error>> {
-        //Split into 5MB chunks
-        const CHUNK_SIZE: u64 = 1024 * 1024 * 5;
-        const MAX_CHUNKS: u64 = 10000;
-
-        let destination_filename = filename;
-        let multipart_upload_res: CreateMultipartUploadOutput = client
-            .create_multipart_upload()
-            .bucket(bucket)
-            .key(destination_filename)
-            .send()
-            .await
-            .unwrap();
-
-        println!("Created multipart upload with ID: {}", multipart_upload_res.upload_id.as_ref().unwrap());
-
-
-        let upload_id = multipart_upload_res.upload_id.unwrap();
-
-        let path = Path::new(filename);
-        let file_size = tokio::fs::metadata(path)
-            .await
-            .expect("it exists I swear")
-            .len();
-
-        let mut chunk_count = (file_size / CHUNK_SIZE) + 1;
-        let mut size_of_last_chunk = file_size % CHUNK_SIZE;
-        if size_of_last_chunk == 0 {
-                size_of_last_chunk = CHUNK_SIZE;
-                chunk_count -= 1;
-        }
-
-        if file_size == 0 {
-                panic!("Bad file size.");
-        }
-        if chunk_count > MAX_CHUNKS {
-                panic!("Too many chunks! Try increasing your chunk size.")
-        }
-
-        let mut upload_parts: Vec<CompletedPart> = Vec::new();
-
-        for chunk_index in 0..chunk_count {
-                let this_chunk = if chunk_count - 1 == chunk_index {
-                        size_of_last_chunk
-                } else {
-                        CHUNK_SIZE
-                };
-                let stream = ByteStream::read_from()
-                    .path(path)
-                    .offset(chunk_index * CHUNK_SIZE)
-                    .length(Length::Exact(this_chunk))
-                    .build()
-                    .await
-                    .unwrap();
-                //Chunk index needs to start at 0, but part numbers start at 1.
-                let part_number = (chunk_index as i32) + 1;
-                // snippet-start:[rust.example_code.s3.upload_part]
-                let upload_part_res = client
-                    .upload_part()
-                    .key(filename)
-                    .bucket(bucket)
-                    .upload_id(upload_id.clone())
-                    .body(stream)
-                    .part_number(part_number)
-                    .send()
-                    .await;
-
-
-
-                upload_parts.push(
-                        CompletedPart::builder()
-                            .e_tag(upload_part_res.unwrap().e_tag.unwrap_or_default())
-                            .part_number(part_number)
-                            .build(),
-                );
-                // snippet-end:[rust.example_code.s3.upload_part]
-        }
-
-
-        // snippet-start:[rust.example_code.s3.upload_part.CompletedMultipartUpload]
-        let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
-            .set_parts(Some(upload_parts))
-            .build();
-        // snippet-end:[rust.example_code.s3.upload_part.CompletedMultipartUpload]
-
-        // snippet-start:[rust.example_code.s3.complete_multipart_upload]
-        let _complete_multipart_upload_res = client
-            .complete_multipart_upload()
-            .bucket(bucket)
-            .key(filename)
-            .multipart_upload(completed_multipart_upload)
-            .upload_id(upload_id.clone())
-            .send()
-            .await
-            .unwrap();
-        // snippet-end:[rust.example_code.s3.complete_multipart_upload]
-
-        Ok(())
-}
-
 
 // When parsing big file you got some key value, then you can append to parquet
 // let file = File::create("output.parquet").unwrap();
@@ -267,8 +166,7 @@ pub async fn upload_parts(client: &Client, bucket: &str, filename: &str)-> Resul
         // append_parquet
         // writer.close().unwrap();
 // }
-fn append_parquet(file: File, writer: ArrowWriter<File>,  key: Vec<Bytes>, value: Vec<Bytes>){
-
+pub fn append_parquet(file: &File, writer: &mut ArrowWriter<File>, key: Vec<Bytes>, value: Vec<Bytes>){
         let key: Vec<&[u8]> = key.iter().map(|b| b.as_ref()).collect();
         let vals: Vec<&[u8]> = value.iter().map(|b| b.as_ref()).collect();
         let ids = BinaryArray::from(key);
@@ -290,39 +188,20 @@ fn append_parquet(file: File, writer: ArrowWriter<File>,  key: Vec<Bytes>, value
             .set_compression(Compression::SNAPPY)
             .build();
         // println!("Schema is: {:?}", batch.schema());
-        let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props)).unwrap();
         writer.write(&batch).expect("Writing batch");
         // writer must be closed to write footer
 
 }
-
-
-fn write_parquet2(filename:&str, key: Vec<Bytes>, value: Vec<Bytes> ){
-        let file = File::create(filename).unwrap();
-        let key: Vec<&[u8]> = key.iter().map(|b| b.as_ref()).collect();
-        let vals: Vec<&[u8]> = value.iter().map(|b| b.as_ref()).collect();
-        let ids = BinaryArray::from(key);
-        let vals = BinaryArray::from(vals);
+pub fn make_writer(file: & File) -> ArrowWriter<File>{
+        let cloned_file = file.try_clone().unwrap();
         let fields = vec![
                 Field::new("id", DataType::Binary, false),
                 Field::new("val", DataType::Binary, false),
         ];
         let schema = Schema::new(fields);
-
-        let batch = RecordBatch::try_new(
-                Arc::new(schema),
-                vec![
-                        Arc::new(ids) as ArrayRef,
-                        Arc::new(vals) as ArrayRef,
-                ],
-        ).unwrap();
-        // WriterProperties can be used to set Parquet file options
+        let batch = RecordBatch::new_empty(SchemaRef::from(schema));
         let props = WriterProperties::builder()
             .set_compression(Compression::SNAPPY)
             .build();
-        // println!("Schema is: {:?}", batch.schema());
-        let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props)).unwrap();
-        writer.write(&batch).expect("Writing batch");
-        // writer must be closed to write footer
-        writer.close().unwrap();
+        return ArrowWriter::try_new(cloned_file, batch.schema(), Some(props)).unwrap();
 }

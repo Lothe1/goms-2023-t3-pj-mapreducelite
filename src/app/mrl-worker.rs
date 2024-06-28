@@ -28,6 +28,7 @@ mod mapreduce {
 
 use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse};
 use mapreduce::coordinator_client::CoordinatorClient;
+use mrlite::Encode::encode_decode::{append_parquet, make_writer};
 
 async fn map(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
@@ -74,6 +75,7 @@ async fn map(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
 
     Ok(filename.to_string())
 }
+
 
 async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error loading workload");
@@ -130,6 +132,56 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
 
     match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
         Ok(_) => println!("Uploaded to {}{}", job.output, filename),
+        Err(e) => eprintln!("Failed to upload: {:?}", e),
+    }
+
+    Ok(filename.to_string())
+}
+
+
+
+async fn map_v2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
+    let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
+    let bucket_name = "mrl-lite";
+    let object_name = &job.input;
+    println!("{:?}", object_name);
+
+    let content = minio::get_object(&client, bucket_name, object_name).await?;
+    let input_kv = KeyValue {
+        key: Bytes::from(object_name.clone()),
+        value: Bytes::from(content),
+    };
+    // println!("{:?}", input_kv.key);
+    let serialized_args = Bytes::from(job.args.join(" "));
+    let map_func = engine.map_fn;
+
+    let mut intermediate_data = Vec::new();
+    for item in map_func(input_kv, serialized_args.clone())? {
+        let kv = item?;
+        intermediate_data.push(kv);
+    }
+    // println!("{:?}", intermediate_data); // works here
+
+    // Store intermediate data back to S3 or a temporary location
+    let _ = fs::create_dir_all("./_temp")?;
+    let filename = now();
+    let temp_path = format!("./_temp/{}", filename);
+    // println!("{:?}", temp_path);
+    let mut file_res = OpenOptions::new().write(true).create(true).open(&temp_path); //File::create(&temp_path)?;
+    // println!("{:?}", file_res);
+    let mut file = file_res.unwrap();
+    // println!("File created!");
+
+    let mut writer = make_writer(&mut file);
+    let (keys, values) = intermediate_data.into_iter().unzip();
+    append_parquet(&file, &mut writer, keys, values).unwrap();
+
+    writer.close().unwrap();
+
+
+
+    match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
+        Ok(_) => println!("Uploaded"),
         Err(e) => eprintln!("Failed to upload: {:?}", e),
     }
 
