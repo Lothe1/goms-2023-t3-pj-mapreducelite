@@ -266,8 +266,7 @@ pub async fn upload_parts(client: &Client, bucket: &str, filename: &str)-> Resul
         // append_parquet
         // writer.close().unwrap();
 // }
-pub fn append_parquet(file: File, writer: ArrowWriter<File>,  key: Vec<Bytes>, value: Vec<Bytes>){
-
+pub fn append_parquet(file: File, writer: &ArrowWriter<File>,  key: Vec<Bytes>, value: Vec<Bytes>){
         let key: Vec<&[u8]> = key.iter().map(|b| b.as_ref()).collect();
         let vals: Vec<&[u8]> = value.iter().map(|b| b.as_ref()).collect();
         let ids = BinaryArray::from(key);
@@ -295,7 +294,8 @@ pub fn append_parquet(file: File, writer: ArrowWriter<File>,  key: Vec<Bytes>, v
 
 }
 
-pub fn make_writer(file: &mut File) -> ArrowWriter<&mut File>{
+pub fn make_writer(file: & File) -> ArrowWriter<File>{
+        let cloned_file = file.try_clone().unwrap();
         let fields = vec![
                 Field::new("id", DataType::Binary, false),
                 Field::new("val", DataType::Binary, false),
@@ -305,5 +305,5 @@ pub fn make_writer(file: &mut File) -> ArrowWriter<&mut File>{
         let props = WriterProperties::builder()
             .set_compression(Compression::SNAPPY)
             .build();
-        return ArrowWriter::try_new(file, batch.schema(), Some(props)).unwrap();
+        return ArrowWriter::try_new(cloned_file, batch.schema(), Some(props)).unwrap();
 }
