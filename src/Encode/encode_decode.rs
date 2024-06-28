@@ -166,7 +166,7 @@ fn combine_parquets(input_files: Vec<&str>, output_file: &str) -> (){
         // append_parquet
         // writer.close().unwrap();
 // }
-pub fn append_parquet(file: File, writer: &ArrowWriter<File>,  key: Vec<Bytes>, value: Vec<Bytes>){
+pub fn append_parquet(file: &File, writer: &mut ArrowWriter<File>, key: Vec<Bytes>, value: Vec<Bytes>){
         let key: Vec<&[u8]> = key.iter().map(|b| b.as_ref()).collect();
         let vals: Vec<&[u8]> = value.iter().map(|b| b.as_ref()).collect();
         let ids = BinaryArray::from(key);
@@ -188,12 +188,10 @@ pub fn append_parquet(file: File, writer: &ArrowWriter<File>,  key: Vec<Bytes>, 
             .set_compression(Compression::SNAPPY)
             .build();
         // println!("Schema is: {:?}", batch.schema());
-        let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props)).unwrap();
         writer.write(&batch).expect("Writing batch");
         // writer must be closed to write footer
 
 }
-
 pub fn make_writer(file: & File) -> ArrowWriter<File>{
         let cloned_file = file.try_clone().unwrap();
         let fields = vec![
