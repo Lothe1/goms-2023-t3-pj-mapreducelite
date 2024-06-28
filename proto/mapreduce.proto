@@ -6,7 +6,7 @@ service Coordinator {
   rpc RegisterWorker(WorkerRegistration) returns (WorkerResponse);
   rpc GetTask(WorkerRequest) returns (Task);
   rpc SubmitJob(JobRequest) returns (JobResponse);
-  rpc ListJobs(Empty) returns (JobList);
+  rpc ListJobs(JobListRequest) returns (JobList);
   rpc SystemStatus(Empty) returns (Status);
   rpc ReportTask(WorkerReport) returns (WorkerResponse);
 }
@@ -48,6 +48,10 @@ message JobResponse {
 }
 
 message Empty {}
+
+message JobListRequest {
+  string show = 1;
+}
 
 message JobList {
   repeated Task jobs = 1;
