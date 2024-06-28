@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 // Map function for the first stage
-pub fn map(kv: KeyValue, _aux: Bytes) -> MapOutput {
+pub fn map_stage_one(kv: KeyValue, _aux: Bytes) -> MapOutput {
     let content = String::from_utf8(kv.value.to_vec())?;
     let mut map_output = Vec::new();
 
@@ -40,7 +40,7 @@ pub fn map(kv: KeyValue, _aux: Bytes) -> MapOutput {
 }
 
 // Reduce function for the first stage
-pub fn reduce(key: Bytes, values: Box<dyn Iterator<Item = Bytes> + '_>, _aux: Bytes) -> Result<Bytes> {
+pub fn reduce_stage_one(key: Bytes, values: Box<dyn Iterator<Item = Bytes> + '_>, _aux: Bytes) -> Result<Bytes> {
     let mut map_a = HashMap::new();
     let mut map_b = HashMap::new();
 
