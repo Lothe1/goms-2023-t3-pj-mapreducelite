@@ -9,7 +9,20 @@ mod mapreduce {
 }
 
 use mapreduce::coordinator_client::CoordinatorClient;
-use mapreduce::{JobRequest, JobListRequest, Empty, Status as SystemStatus};
+use mapreduce::{Empty, JobListRequest, JobRequest, Status as SystemStatus, Task};
+
+fn display_jobs(jobs: Vec<Task>, show: &str) {
+    let n = jobs.len();
+    if n == 0 {
+        println!("No jobs in {} job list", show);
+        return;
+    }
+    let mut ctr = 0;
+    for job in jobs {
+        println!("[{}]\tSTATUS: [{:?}]\tIN: [{}]\tOUT: [{}]\tWORKLOAD: [{}]", ctr, job.status, job.input, job.output, job.workload);
+        ctr+=1;
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -43,9 +56,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 None => format!("default")
             };
-            println!("{}", show_req);
-            let response = client.list_jobs(Request::new(JobListRequest {show: show_req})).await?;
-            println!("Job list: {:?}", response); 
+            // println!("{}", show_req);
+            let response = client.list_jobs(Request::new(JobListRequest {show: show_req.clone()})).await?;
+            display_jobs(response.into_inner().jobs, &show_req);
+            // println!("Job list: {:?}", response); 
         },
         Commands::Status {} => {
             let response = client.system_status(Request::new(Empty {})).await?;
@@ -56,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             for worker in system_status.workers {
                 println!("Worker Address: {}, State: {}", worker.address, worker.state);
             }
-            println!("Jobs: {:?}", system_status.jobs);
+            // println!("Jobs: {:?}", system_status.jobs);
         },
     }
 
