@@ -29,7 +29,7 @@ mod mapreduce {
 use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse};
 use mapreduce::coordinator_client::CoordinatorClient;
 use mrlite::Encode::encode_decode::{append_parquet, KeyValueList_to_KeyListandValueList, make_writer};
-use mrlite::S3::minio::{upload_parquet, upload_parts};
+use mrlite::S3::minio::{upload_parts};
 
 async fn map(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
@@ -166,7 +166,7 @@ async fn map_v2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let filename = now();
     let temp_path = format!("./_temp/{}", filename);
     // println!("{:?}", temp_path);
-    let mut file_res = OpenOptions::new().write(true).create(true).open(&temp_path); //File::create(&temp_path)?;
+    let mut file_res = OpenOptions::new().write(true).create(true).open(temp_path.clone()); //File::create(&temp_path)?;
     // println!("{:?}", file_res);
     let mut file = file_res.unwrap();
     // println!("File created!");
@@ -174,11 +174,11 @@ async fn map_v2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let mut writer = make_writer(&mut file);
 
     let (keys, values) = KeyValueList_to_KeyListandValueList(intermediate_data);
-    append_parquet(&file, &mut writer, keys, values).unwrap();
+    append_parquet(&file, &mut writer, keys, values);
 
     writer.close().unwrap();
 
-    upload_parts(&client, bucket_name, temp_path).await?;
+    upload_parts(&client, bucket_name, temp_path.as_str()).await.expect("TODO: panic message");
 
     Ok(temp_path.to_string())
 }
