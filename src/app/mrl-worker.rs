@@ -29,6 +29,7 @@ mod mapreduce {
 use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse};
 use mapreduce::coordinator_client::CoordinatorClient;
 use mrlite::Encode::encode_decode::{append_parquet, KeyValueList_to_KeyListandValueList, make_writer};
+use mrlite::S3::minio::{upload_parquet, upload_parts};
 
 async fn map(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
@@ -177,11 +178,7 @@ async fn map_v2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
 
     writer.close().unwrap();
 
-
-    match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
-        Ok(_) => println!("Uploaded"),
-        Err(e) => eprintln!("Failed to upload: {:?}", e),
-    }
+    upload_parts(&client, bucket_name, filename).await?;
 
     Ok(filename.to_string())
 }
@@ -194,6 +191,7 @@ async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
 
     // Fetch intermediate data from MinIO
     let content = minio::get_object(&client, bucket_name, object_name).await?;
+
     let reader = io::BufReader::new(content.as_bytes());
 
     // Intermediate data storage
