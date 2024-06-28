@@ -85,7 +85,10 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let content = minio::get_object(&client, bucket_name, object_name).await?;
     let reader = io::BufReader::new(content.as_bytes());
 
+    // Intermediate data storage
     let mut intermediate_data = HashMap::new();
+
+    // Read and parse intermediate data
     for line in reader.lines() {
         let line = line?;
         let parts: Vec<&str> = line.split('\t').collect();
@@ -96,26 +99,33 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
         }
     }
 
+    // Sort intermediate data by key
+    let mut sorted_intermediate_data: Vec<(String, Vec<String>)> = intermediate_data.into_iter().collect();
+    sorted_intermediate_data.sort_by(|a, b| a.0.cmp(&b.0));
+
+    // Reduce intermediate data
     let mut output_data = Vec::new();
     let serialized_args = Bytes::from(job.args.join(" "));
     let reduce_func = engine.reduce_fn;
-    for (key, values) in intermediate_data {        
+
+    for (key, values) in sorted_intermediate_data {
         let kv = KeyValue {
             key: Bytes::from(key.clone()),
             value: Bytes::from(values.join(",")),
         };
-        
+
         let value_iter = Box::new(values.into_iter().map(Bytes::from));
         let reduced_value = reduce_func(Bytes::from(key.clone()), value_iter, serialized_args.clone())?;
         output_data.push(KeyValue { key: Bytes::from(key.clone()), value: reduced_value });
     }
 
+    // Prepare and upload the final output
     let filename = now();
-    let mut content = String::new(); 
+    let mut content = String::new();
 
     for kv in &output_data {
         // println!("k: {:?} || v: {}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value));
-        content.push_str(&format!("{}", String::from_utf8_lossy(&kv.value)));
+        content.push_str(&format!("{}\t{}\n", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value)));
     }
 
     match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
