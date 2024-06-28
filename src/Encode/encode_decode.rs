@@ -156,7 +156,6 @@ fn combine_parquets(input_files: Vec<&str>, output_file: &str) -> (){
         writer.close().unwrap();
 }
 
-
 //filename has to be the same name as upload to s3
 pub async fn upload_parts(client: &Client, bucket: &str, filename: &str)-> Result<(), Box<dyn std::error::Error>> {
         //Split into 5MB chunks
@@ -267,7 +266,7 @@ pub async fn upload_parts(client: &Client, bucket: &str, filename: &str)-> Resul
         // append_parquet
         // writer.close().unwrap();
 // }
-fn append_parquet(file: File, writer: ArrowWriter<File>,  key: Vec<Bytes>, value: Vec<Bytes>){
+pub fn append_parquet(file: File, writer: ArrowWriter<File>,  key: Vec<Bytes>, value: Vec<Bytes>){
 
         let key: Vec<&[u8]> = key.iter().map(|b| b.as_ref()).collect();
         let vals: Vec<&[u8]> = value.iter().map(|b| b.as_ref()).collect();
@@ -296,33 +295,15 @@ fn append_parquet(file: File, writer: ArrowWriter<File>,  key: Vec<Bytes>, value
 
 }
 
-
-fn write_parquet2(filename:&str, key: Vec<Bytes>, value: Vec<Bytes> ){
-        let file = File::create(filename).unwrap();
-        let key: Vec<&[u8]> = key.iter().map(|b| b.as_ref()).collect();
-        let vals: Vec<&[u8]> = value.iter().map(|b| b.as_ref()).collect();
-        let ids = BinaryArray::from(key);
-        let vals = BinaryArray::from(vals);
+pub fn make_writer(file: &mut File) -> ArrowWriter<&mut File>{
         let fields = vec![
                 Field::new("id", DataType::Binary, false),
                 Field::new("val", DataType::Binary, false),
         ];
         let schema = Schema::new(fields);
-
-        let batch = RecordBatch::try_new(
-                Arc::new(schema),
-                vec![
-                        Arc::new(ids) as ArrayRef,
-                        Arc::new(vals) as ArrayRef,
-                ],
-        ).unwrap();
-        // WriterProperties can be used to set Parquet file options
+        let batch = RecordBatch::new_empty(SchemaRef::from(schema));
         let props = WriterProperties::builder()
             .set_compression(Compression::SNAPPY)
             .build();
-        // println!("Schema is: {:?}", batch.schema());
-        let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props)).unwrap();
-        writer.write(&batch).expect("Writing batch");
-        // writer must be closed to write footer
-        writer.close().unwrap();
+        return ArrowWriter::try_new(file, batch.schema(), Some(props)).unwrap();
 }
