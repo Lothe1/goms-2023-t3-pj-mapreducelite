@@ -225,11 +225,6 @@ fn check_all_file_states(files: &Vec<String>, file_status: &HashMap<String, File
     }
 }
 
-fn get_worker(addr: &SocketAddr, workers: &HashMap<SocketAddr, WorkerNode>) -> WorkerNode {
-    let mut this_worker = workers.get(&addr).unwrap();
-    this_worker.clone()
-}
-
 #[tonic::async_trait]
 impl Coordinator for CoordinatorService {
 

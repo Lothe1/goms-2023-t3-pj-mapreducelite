@@ -54,9 +54,9 @@ async fn map(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     // println!("{:?}", intermediate_data); // works here
 
     // Store intermediate data back to S3 or a temporary location
-    let _ = fs::create_dir_all("./_temp")?;
+    let _ = fs::create_dir_all(format!(".{}", job.output))?;
     let filename = now();
-    let temp_path = format!("./_temp/{}", filename);
+    let temp_path = format!(".{}{}",  job.output,filename);
     // println!("{:?}", temp_path);
     let mut file_res = OpenOptions::new().write(true).create(true).open(&temp_path); //File::create(&temp_path)?;
     // println!("{:?}", file_res);
@@ -162,9 +162,9 @@ async fn map2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     // println!("{:?}", intermediate_data); // works here
 
     // Store intermediate data back to S3 or a temporary location
-    let _ = fs::create_dir_all("./_temp")?;
+    let _ = fs::create_dir_all(format!(".{}", job.output))?;
     let filename = now();
-    let temp_path = format!("/_temp/{}", filename);
+    let temp_path = format!("{}{}",  job.output,filename);
     // println!("{:?}", temp_path);
     let mut file_res = OpenOptions::new().write(true).create(true).open(&format!(".{temp_path}")); //File::create(&temp_path)?;
 
@@ -303,7 +303,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     "Reduce" => {
-                        match reduce2(&s3_client, &job).await {
+                        match reduce(&s3_client, &job).await {
                             Ok(name) => Some(name),
                             Err(err) => {
                                 eprintln!("Error during reduce task: {:?}", err);
@@ -322,7 +322,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let report = Request::new(WorkerReport {
                         task: task.status,
                         input: task.input,
-                        output: format!("{}{}", task.output, out_fn.unwrap()),
+                        output: format!("{}", out_fn.unwrap()),
                     });
                     if let Err(err) = client.report_task(report).await {
                         eprintln!("Error reporting task completion: {:?}", err);
