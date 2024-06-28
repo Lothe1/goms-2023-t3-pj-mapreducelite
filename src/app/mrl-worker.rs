@@ -178,9 +178,9 @@ async fn map_v2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
 
     writer.close().unwrap();
 
-    upload_parts(&client, bucket_name, filename).await?;
+    upload_parts(&client, bucket_name, temp_path).await?;
 
-    Ok(filename.to_string())
+    Ok(temp_path.to_string())
 }
 
 async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
