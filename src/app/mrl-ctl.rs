@@ -24,6 +24,42 @@ fn display_jobs(jobs: Vec<Task>, show: &str) {
     }
 }
 
+fn display_system_status(sys_stat: SystemStatus) {
+    let n_workers = sys_stat.worker_count;
+    let mut ctr = 0;
+    let mut active_count = 0;
+    let mut dead_count = 0;
+    println!("---------- WORKER STATUS ----------");
+    for worker in sys_stat.workers {
+        println!("Worker [{}]\tState: {}", ctr, worker.state);
+        if worker.state == format!("Idle") || worker.state == format!("Busy") {
+            active_count += 1;
+        } else {
+            dead_count += 1;
+        }
+        ctr+=1;
+    }
+    // Ideally we want some health stats here like how many idle/busy workers out of n_workers
+    println!("-----------------------------------");
+    println!("System health:\t{}%", (active_count/n_workers)*100);
+    println!("Active Workers:\t{active_count} / {n_workers}");
+    println!("Dead Workers:\t{dead_count} / {n_workers}");
+    println!("-----------------------------------");
+
+    match sys_stat.jobs.get(0) {
+        Some(job) => {
+            println!("System is currently working on:");
+            println!("[CURRENT JOB]\tSTATUS: [{:?}]\tIN: [{}]\tOUT: [{}]\tWORKLOAD: [{}]", job.status, job.input, job.output, job.workload);
+        },
+        None => {
+            println!("System is currently idle -- no jobs queued");
+            println!("-----------------------------------");
+            return;
+        }
+    }
+    println!("-----------------------------------");
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
@@ -65,11 +101,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let response = client.system_status(Request::new(Empty {})).await?;
             println!("System status: {:?}", response);
             
-            let system_status: SystemStatus = response.into_inner();
-            println!("Worker Count: {}", system_status.worker_count);
-            for worker in system_status.workers {
-                println!("Worker Address: {}, State: {}", worker.address, worker.state);
-            }
+            display_system_status(response.into_inner());
+            // let system_status: SystemStatus = response.into_inner();
+            // println!("Worker Count: {}", system_status.worker_count);
+            // for worker in system_status.workers {
+            //     println!("Worker Address: {}, State: {}", worker.address, worker.state);
+            // }
             // println!("Jobs: {:?}", system_status.jobs);
         },
     }

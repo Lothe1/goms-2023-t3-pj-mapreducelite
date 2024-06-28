@@ -528,7 +528,7 @@ impl Coordinator for CoordinatorService {
         let mut jobs = Vec::new();
         for job in job_q.iter() {
             let task = Task {
-                input: job.files.lock().unwrap().iter().join(","),
+                input: job.job.input.clone(),
                 workload: job.job.workload.clone(),
                 output: job.job.output.clone(),
                 args: job.job.args.join(" "),
