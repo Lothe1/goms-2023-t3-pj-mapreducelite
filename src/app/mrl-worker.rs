@@ -175,7 +175,7 @@ async fn map_v2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let mut writer = make_writer(&mut file);
     let (keys, values) = intermediate_data.into_iter().unzip();
     append_parquet(file, &writer, keys, values).unwrap();
-    
+
     writer.close().unwrap();
 
 
