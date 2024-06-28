@@ -18,7 +18,7 @@ mod mapreduce {
 }
 
 use mapreduce::coordinator_server::{Coordinator, CoordinatorServer};
-use mapreduce::{WorkerRegistration, WorkerResponse, WorkerRequest, Task, JobRequest, JobResponse, WorkerReport, Empty, JobList, Status as SystemStatus, Worker};
+use mapreduce::{Empty, JobList, JobListRequest, JobRequest, JobResponse, Status as SystemStatus, Task, Worker, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse};
 use mrlite::S3::minio::*;
 
 /* 
@@ -86,6 +86,7 @@ impl CoordinatorService {
     fn new(ip: impl ToString, user: impl ToString, pw: impl ToString, client: Client) -> Self {
         Self {
             job_queue: Arc::new(Mutex::new(VecDeque::new())),
+            completed_jobs: Arc::new(Mutex::new(VecDeque::new())),
             workers: Arc::new(Mutex::new(Vec::new())),
             os_ip: ip.to_string(),
             os_user: user.to_string(),
@@ -98,6 +99,7 @@ impl CoordinatorService {
 // Struct for the coordinator, which holds the job queue and the worker list.
 pub struct CoordinatorService {
     job_queue: Arc<Mutex<VecDeque<Job>>>,
+    completed_jobs: Arc<Mutex<VecDeque<Job>>>,
     workers: Arc<Mutex<Vec<WorkerNode>>>,
     os_ip: String,
     os_user: String,
@@ -396,13 +398,11 @@ impl Coordinator for CoordinatorService {
 
                     }
                     JobStatus::Completed => {
-                        job_q.push_front(job);
-                        println!("Should not occur yet");
+                        let mut completed_jobs = self.completed_jobs.lock().unwrap();
+                        completed_jobs.push_back(job);
+                        println!("Job completed!");
 
-                        return Err(Status::not_found("No job available"))
-                    }
-                    _ => {
-                        return Err(Status::unimplemented("Feature not implemented yet"))
+                        return Err(Status::not_found("Job completed!"))
                     }
                 }
             },
@@ -468,8 +468,8 @@ impl Coordinator for CoordinatorService {
 
     // List all jobs in the job queue
     // and return the list to the client
-    async fn list_jobs(&self, _request: Request<Empty>) -> Result<Response<JobList>, Status> {
-        let jobs = self.job_queue.lock().unwrap();
+    async fn list_jobs(&self, request: Request<JobListRequest>) -> Result<Response<JobList>, Status> {
+        let show = request.get_ref().show.clone();
         // Define a standalone function to convert from Job to Task
         fn job_to_task(job: Job) -> Task {
             Task {
@@ -480,10 +480,39 @@ impl Coordinator for CoordinatorService {
                 status: format!("{:?}", job.status),
             }
         }
-        // Use the job_to_task function inside the map function
-        println!("{}", format!("--------------\n{:?}\n-------------", jobs));
+        let tasks = match show {
+            s if s == format!("complete") => {
+                let completed_jobs = self.completed_jobs.lock().unwrap();
 
-        let tasks: Vec<Task> = jobs.iter().map(|job| job_to_task(job.clone())).collect();
+                println!("{}", format!("--------------\n{:?}\n-------------", completed_jobs));
+    
+                let tasks: Vec<Task> = completed_jobs.iter().map(|job| job_to_task(job.clone())).collect();
+                tasks
+            }
+            s if s == format!("all") => {
+                let completed_jobs = self.completed_jobs.lock().unwrap();
+
+                println!("{}", format!("--------------\n{:?}\n-------------", completed_jobs));
+    
+                let mut completed_tasks: Vec<Task> = completed_jobs.iter().map(|job| job_to_task(job.clone())).collect();
+                let jobs = self.job_queue.lock().unwrap();
+
+                println!("{}", format!("--------------\n{:?}\n-------------", jobs));
+    
+                let mut tasks: Vec<Task> = jobs.iter().map(|job| job_to_task(job.clone())).collect();
+                completed_tasks.append(&mut tasks);
+                completed_tasks
+            }
+            _ => {
+
+                let jobs = self.job_queue.lock().unwrap();
+
+                println!("{}", format!("--------------\n{:?}\n-------------", jobs));
+    
+                let tasks: Vec<Task> = jobs.iter().map(|job| job_to_task(job.clone())).collect();
+                tasks
+            }
+        };
         Ok(Response::new(JobList { jobs: tasks }))
     }
     

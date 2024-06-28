@@ -32,9 +32,12 @@ pub enum Commands {
     /// Lists all jobs that have been submitted to the system and their statuses
     /// 
     /// Statuses include: pending, map phase <progress>, shuffle, 
-    /// shuffle phase <progress>, or completed
+    /// shuffle phase <progress>, or completed.
     Jobs {
-
+        /// Arg to show all only completed jobs, all jobs or only non-completed jobs.
+        /// Valid arguments: complete, all, default (non-completed)
+        #[arg(short, long, default_value = None)]
+        show: Option<String>,
     },
     /// Displays the health status of the system, showing how many workers
     /// are registered, what the coordinator/worker(s) are up to.

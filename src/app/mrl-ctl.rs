@@ -9,7 +9,7 @@ mod mapreduce {
 }
 
 use mapreduce::coordinator_client::CoordinatorClient;
-use mapreduce::{JobRequest, Empty, Status as SystemStatus};
+use mapreduce::{JobRequest, JobListRequest, Empty, Status as SystemStatus};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,8 +33,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let response = client.submit_job(request).await?;
             println!("Submitted job: {:?}", response);
         },
-        Commands::Jobs {} => {
-            let response = client.list_jobs(Request::new(Empty {})).await?;
+        Commands::Jobs {show} => {
+            let show_req = match show {
+                Some(s) => match s {
+                    s if s == format!("all") || s == format!("a") => s,
+                    s if s == format!("complete") || s == format!("c") => s,
+                    s if s == format!("default") || s == format!("d") => s,
+                    _ => format!("default")
+                }
+                None => format!("default")
+            };
+            println!("{}", show_req);
+            let response = client.list_jobs(Request::new(JobListRequest {show: show_req})).await?;
             println!("Job list: {:?}", response); 
         },
         Commands::Status {} => {
