@@ -26,18 +26,16 @@ fn display_jobs(jobs: Vec<Task>, show: &str) {
 
 fn display_system_status(sys_stat: SystemStatus) {
     let n_workers = sys_stat.worker_count;
-    let mut ctr = 0;
     let mut active_count = 0;
     let mut dead_count = 0;
     println!("---------- WORKER STATUS ----------");
     for worker in sys_stat.workers {
-        println!("Worker [{}]\tState: {}", ctr, worker.state);
+        println!("[{}]\tState: {}", worker.address, worker.state);
         if worker.state == format!("Idle") || worker.state == format!("Busy") {
             active_count += 1;
         } else {
             dead_count += 1;
         }
-        ctr+=1;
     }
     // Ideally we want some health stats here like how many idle/busy workers out of n_workers
     println!("-----------------------------------");

@@ -67,7 +67,7 @@ struct Job {
 // 
 // A worker node is `busy` if it is currently operating a task, and `dead` if it has not responded
 // to a status check (heartbeat).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum WorkerState {
     Idle,
     Busy,
@@ -76,9 +76,12 @@ enum WorkerState {
 
 // Struct for a worker, which holds the state of a worker
 // and the IP address of the worker to send RPC for communication.
+#[derive(Debug, Clone)]
 struct WorkerNode {
     state: WorkerState,
     addr: SocketAddr,
+    /// Time since this Worker last checked in
+    elapsed: u128,
 }
 
 // Creates a new Coordinator Service with the supplied arguments
@@ -87,7 +90,7 @@ impl CoordinatorService {
         Self {
             job_queue: Arc::new(Mutex::new(VecDeque::new())),
             completed_jobs: Arc::new(Mutex::new(VecDeque::new())),
-            workers: Arc::new(Mutex::new(Vec::new())),
+            workers: Arc::new(Mutex::new(HashMap::new())),
             os_ip: ip.to_string(),
             os_user: user.to_string(),
             os_pw: pw.to_string(),
@@ -100,7 +103,7 @@ impl CoordinatorService {
 pub struct CoordinatorService {
     job_queue: Arc<Mutex<VecDeque<Job>>>,
     completed_jobs: Arc<Mutex<VecDeque<Job>>>,
-    workers: Arc<Mutex<Vec<WorkerNode>>>,
+    workers: Arc<Mutex<HashMap<SocketAddr, WorkerNode>>>,
     os_ip: String,
     os_user: String,
     os_pw: String,
@@ -222,6 +225,11 @@ fn check_all_file_states(files: &Vec<String>, file_status: &HashMap<String, File
     }
 }
 
+fn get_worker(addr: &SocketAddr, workers: &HashMap<SocketAddr, WorkerNode>) -> WorkerNode {
+    let mut this_worker = workers.get(&addr).unwrap();
+    this_worker.clone()
+}
+
 #[tonic::async_trait]
 impl Coordinator for CoordinatorService {
 
@@ -232,7 +240,8 @@ impl Coordinator for CoordinatorService {
         let worker_addr = request.remote_addr().ok_or_else(|| Status::unknown("No remote address"))?;
         let worker = WorkerNode {
             state: WorkerState::Idle,
-            addr: worker_addr,
+            addr: worker_addr.clone(),
+            elapsed: now(),
         };
         println!("New worker joined at {:?}", worker.addr.to_string());
         let mut args: HashMap<String, String> = HashMap::new();
@@ -240,7 +249,7 @@ impl Coordinator for CoordinatorService {
         args.insert("user".into(), self.os_user.clone());
         args.insert("pw".into(), self.os_pw.clone());
         let mut workers = self.workers.lock().unwrap_or_else(|e| e.into_inner());
-        workers.push(worker);
+        workers.insert(worker_addr, worker);
 
         Ok(Response::new(WorkerResponse {
             success: true,
@@ -255,6 +264,7 @@ impl Coordinator for CoordinatorService {
     // Once a worker is registered and ready to perform work, it will periodically request tasks from the coordinator to execute
     async fn get_task(&self, _request: Request<WorkerRequest>) -> Result<Response<Task>, Status> {
         let mut job_q = self.job_queue.lock().unwrap_or_else(|e| e.into_inner());
+        let worker_addr = _request.remote_addr().ok_or_else(|| Status::unknown("No remote address"))?;
         match job_q.pop_front() {
             Some(job) => {
                 match job.status {
@@ -287,6 +297,8 @@ impl Coordinator for CoordinatorService {
                         job_q.push_front(modified_job);
                         // job.status = JobStatus::MapPhase;
                         println!("Gave a pending task for mapping");
+                        let mut workers = self.workers.lock().unwrap();
+                        workers.insert(worker_addr, WorkerNode { state: WorkerState::Busy, addr: worker_addr.clone(), elapsed: now() });
                         return Ok(Response::new(task))
                     }
                     JobStatus::MapPhase => {
@@ -298,6 +310,8 @@ impl Coordinator for CoordinatorService {
                             None => { 
                                 let modified_job = job.clone();
                                 job_q.push_front(modified_job);
+                                let mut workers = self.workers.lock().unwrap();
+                                workers.insert(worker_addr, WorkerNode { state: WorkerState::Idle, addr: worker_addr.clone(), elapsed: now() });
                                 return Err(Status::not_found("No job available"))
                             }
                         };
@@ -323,6 +337,8 @@ impl Coordinator for CoordinatorService {
                         };
                         job_q.push_front(modified_job);
                         println!("Gave a pending task or lagging task");
+                        let mut workers = self.workers.lock().unwrap();
+                        workers.insert(worker_addr, WorkerNode { state: WorkerState::Busy, addr: worker_addr.clone(), elapsed: now() });
                         return Ok(Response::new(task))
                     }
                     JobStatus::Shuffle => {
@@ -355,7 +371,8 @@ impl Coordinator for CoordinatorService {
                         };
                         job_q.push_front(modified_job);
                         println!("Gave a pending task for reducing");
-
+                        let mut workers = self.workers.lock().unwrap();
+                        workers.insert(worker_addr, WorkerNode { state: WorkerState::Busy, addr: worker_addr.clone(), elapsed: now() });
                         return Ok(Response::new(task))
                     }
                     JobStatus::ReducePhase => {
@@ -366,6 +383,8 @@ impl Coordinator for CoordinatorService {
                             None => { 
                                 let modified_job = job.clone();
                                 job_q.push_front(modified_job);
+                                let mut workers = self.workers.lock().unwrap();
+                                workers.insert(worker_addr, WorkerNode { state: WorkerState::Idle, addr: worker_addr.clone(), elapsed: now() });
                                 return Err(Status::not_found("No job available"))
                             }
                         };
@@ -394,6 +413,8 @@ impl Coordinator for CoordinatorService {
                         };
                         job_q.push_front(modified_job);
                         println!("Gave a reducing task");
+                        let mut workers = self.workers.lock().unwrap();
+                        workers.insert(worker_addr, WorkerNode { state: WorkerState::Busy, addr: worker_addr.clone(), elapsed: now() });
                         return Ok(Response::new(task))
 
                     }
@@ -402,11 +423,17 @@ impl Coordinator for CoordinatorService {
                         completed_jobs.push_back(job);
                         println!("Job completed!");
 
+                        let mut workers = self.workers.lock().unwrap();
+                        workers.insert(worker_addr, WorkerNode { state: WorkerState::Idle, addr: worker_addr.clone(), elapsed: now() });
                         return Err(Status::not_found("Job completed!"))
                     }
                 }
             },
-            None => return Err(Status::not_found("No job available"))
+            None => {
+                let mut workers = self.workers.lock().unwrap();
+                workers.insert(worker_addr, WorkerNode { state: WorkerState::Idle, addr: worker_addr.clone(), elapsed: now() });
+                return Err(Status::not_found("No job available"))
+            }
         }
     }
 
@@ -519,8 +546,8 @@ impl Coordinator for CoordinatorService {
     // Get the system status
     async fn system_status(&self, _request: Request<Empty>) -> Result<Response<SystemStatus>, Status> {
         let workers = self.workers.lock().unwrap();
-        let worker_list: Vec<Worker> = workers.iter().map(|worker| Worker {
-            address: worker.addr.to_string().clone(),
+        let worker_list: Vec<Worker> = workers.iter().map(|(worker_addr, worker)| Worker {
+            address: worker_addr.to_string().clone(),
             state: format!("{:?}", worker.state),
         }).collect();
         
