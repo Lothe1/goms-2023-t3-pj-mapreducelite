@@ -72,13 +72,10 @@ fn batch_reading_parquet(filename: &str, start: usize, batch_size: usize) -> (Ve
 }
 fn write_parquet(filename:&str, key: Vec<Bytes>, value: Vec<Bytes>){
         let file = File::create(filename).unwrap();
-
         let key: Vec<&[u8]> = key.iter().map(|b| b.as_ref()).collect();
         let vals: Vec<&[u8]> = value.iter().map(|b| b.as_ref()).collect();
         let ids = BinaryArray::from(key);
         let vals = BinaryArray::from(vals);
-
-
         let fields = vec![
                 Field::new("id", DataType::Binary, false),
                 Field::new("val", DataType::Binary, false),
@@ -92,9 +89,6 @@ fn write_parquet(filename:&str, key: Vec<Bytes>, value: Vec<Bytes>){
                         Arc::new(vals) as ArrayRef,
                 ],
         ).unwrap();
-
-
-
         // WriterProperties can be used to set Parquet file options
         let props = WriterProperties::builder()
             .set_compression(Compression::SNAPPY)
@@ -105,6 +99,7 @@ fn write_parquet(filename:&str, key: Vec<Bytes>, value: Vec<Bytes>){
         // writer must be closed to write footer
         writer.close().unwrap();
 }
+
 fn arr_to_vec(binary_array: &BinaryArray) -> Vec<Bytes> {
         let mut ret = Vec::new();
         for i in 0..binary_array.len() {
@@ -116,7 +111,6 @@ fn arr_to_vec(binary_array: &BinaryArray) -> Vec<Bytes> {
 }
 fn read_parquet(filename: &str)-> (Vec<Bytes>, Vec<Bytes>){
         //Will explode if you have more than one collumn
-
         let file = File::open(filename).unwrap();
         let builder = ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
         // println!("Converted arrow schema is: {}", builder.schema());
@@ -126,12 +120,8 @@ fn read_parquet(filename: &str)-> (Vec<Bytes>, Vec<Bytes>){
         // Print out the content of the Parquet file
         let key_arr_ref = record_batch.column(0);
         let value_arr_ref = record_batch.column(1);
-
         let ret_key = arr_to_vec(key_arr_ref.as_any().downcast_ref::<BinaryArray>().unwrap());
         let ret_value = arr_to_vec(value_arr_ref.as_any().downcast_ref::<BinaryArray>().unwrap());
-
-
-
         return (ret_key, ret_value) ;
 
 
@@ -266,4 +256,73 @@ pub async fn upload_parts(client: &Client, bucket: &str, filename: &str)-> Resul
         // snippet-end:[rust.example_code.s3.complete_multipart_upload]
 
         Ok(())
+}
+
+
+// When parsing big file you got some key value, then you can append to parquet
+// let file = File::create("output.parquet").unwrap();
+// Some loop{
+        // getKeyValue
+        // let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props)).unwrap();
+        // append_parquet
+        // writer.close().unwrap();
+// }
+fn append_parquet(file: File, writer: ArrowWriter<File>,  key: Vec<Bytes>, value: Vec<Bytes>){
+
+        let key: Vec<&[u8]> = key.iter().map(|b| b.as_ref()).collect();
+        let vals: Vec<&[u8]> = value.iter().map(|b| b.as_ref()).collect();
+        let ids = BinaryArray::from(key);
+        let vals = BinaryArray::from(vals);
+        let fields = vec![
+                Field::new("id", DataType::Binary, false),
+                Field::new("val", DataType::Binary, false),
+        ];
+        let schema = Schema::new(fields);
+        let batch = RecordBatch::try_new(
+                Arc::new(schema),
+                vec![
+                        Arc::new(ids) as ArrayRef,
+                        Arc::new(vals) as ArrayRef,
+                ],
+        ).unwrap();
+        // WriterProperties can be used to set Parquet file options
+        let props = WriterProperties::builder()
+            .set_compression(Compression::SNAPPY)
+            .build();
+        // println!("Schema is: {:?}", batch.schema());
+        let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props)).unwrap();
+        writer.write(&batch).expect("Writing batch");
+        // writer must be closed to write footer
+
+}
+
+
+fn write_parquet2(filename:&str, key: Vec<Bytes>, value: Vec<Bytes> ){
+        let file = File::create(filename).unwrap();
+        let key: Vec<&[u8]> = key.iter().map(|b| b.as_ref()).collect();
+        let vals: Vec<&[u8]> = value.iter().map(|b| b.as_ref()).collect();
+        let ids = BinaryArray::from(key);
+        let vals = BinaryArray::from(vals);
+        let fields = vec![
+                Field::new("id", DataType::Binary, false),
+                Field::new("val", DataType::Binary, false),
+        ];
+        let schema = Schema::new(fields);
+
+        let batch = RecordBatch::try_new(
+                Arc::new(schema),
+                vec![
+                        Arc::new(ids) as ArrayRef,
+                        Arc::new(vals) as ArrayRef,
+                ],
+        ).unwrap();
+        // WriterProperties can be used to set Parquet file options
+        let props = WriterProperties::builder()
+            .set_compression(Compression::SNAPPY)
+            .build();
+        // println!("Schema is: {:?}", batch.schema());
+        let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props)).unwrap();
+        writer.write(&batch).expect("Writing batch");
+        // writer must be closed to write footer
+        writer.close().unwrap();
 }
