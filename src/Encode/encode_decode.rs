@@ -22,6 +22,7 @@ use aws_smithy_types::byte_stream::{ByteStream, Length};
 use std::process;
 use aws_sdk_s3::config::{Builder, Credentials};
 use uuid::Uuid;
+use crate::KeyValue;
 
 // fn main() {
 //         let key = vec![Bytes::from("ball"), Bytes::from("bat"), Bytes::from("glove"), Bytes::from("glove")];
@@ -204,4 +205,14 @@ pub fn make_writer(file: & File) -> ArrowWriter<File>{
             .set_compression(Compression::SNAPPY)
             .build();
         return ArrowWriter::try_new(cloned_file, batch.schema(), Some(props)).unwrap();
+}
+
+pub fn KeyValueList_to_KeyListandValueList(kv_list: Vec<KeyValue>) -> (Vec<Bytes>, Vec<Bytes>){
+        let mut key_list = Vec::new();
+        let mut value_list = Vec::new();
+        for kv in kv_list{
+                key_list.push(kv.key);
+                value_list.push(kv.value);
+        }
+        return (key_list, value_list);
 }
