@@ -202,7 +202,8 @@ pub async fn upload_parts(client: &Client, bucket: &str, filename: &str)-> Resul
 
     let upload_id = multipart_upload_res.upload_id.unwrap();
 
-    let path = Path::new(filename);
+    let local_file = format!(".{}", &filename);
+    let path = Path::new(&local_file);
     let file_size = tokio::fs::metadata(path)
         .await
         .expect("it exists I swear")

@@ -546,11 +546,17 @@ impl Coordinator for CoordinatorService {
     // Get the system status
     async fn system_status(&self, _request: Request<Empty>) -> Result<Response<SystemStatus>, Status> {
         let workers = self.workers.lock().unwrap();
-        let worker_list: Vec<Worker> = workers.iter().map(|(worker_addr, worker)| Worker {
-            address: worker_addr.to_string().clone(),
-            state: format!("{:?}", worker.state),
-        }).collect();
-        
+        let worker_list: Vec<Worker> = workers.iter().map(|(worker_addr, worker)| {
+            let state = if (now() - worker.elapsed) > STRAGGLE_LIMIT {
+                WorkerState::Dead
+            } else {
+                worker.state.clone()
+            };
+            Worker {
+                address: worker_addr.to_string().clone(),
+                state: format!("{:?}", state),
+            }
+        }).collect();      
         let job_q = self.job_queue.lock().unwrap();
         let mut jobs = Vec::new();
         for job in job_q.iter() {
