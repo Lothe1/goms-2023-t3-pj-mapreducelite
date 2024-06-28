@@ -16,9 +16,7 @@ use aws_sdk_s3::types::ReplicationStatus::Failed;
 use clap::Parser;
 use parquet::file::reader::Length;
 use tracing::trace;
-
-
-
+use uuid::Uuid;
 
 
 pub async fn create_directory(client: &Client, bucket: &str, directory: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -284,6 +282,31 @@ pub async fn upload_parts(client: &Client, bucket: &str, filename: &str)-> Resul
 }
 
 
+pub async fn download_file(client: &Client, bucket: &str, object: &str, tempfilename: &str) -> Result<usize, anyhow::Error> {
+    //Bucket is the name of the bucket, object is the name of the object
+    trace!("bucket:      {}", bucket);
+    trace!("object:      {}", object);
+    // trace!("destination: {}", opt.destination.display());
+    let mut object = client
+        .get_object()
+        .bucket(bucket)
+        .key(object)
+        .send()
+        .await?;
+
+
+    let mut file = File::create(tempfilename)?;
+
+    let mut byte_count = 0_usize;
+    while let Some(bytes) = object.body.try_next().await? {
+        let bytes_len = bytes.len();
+        file.write_all(&bytes)?;
+        trace!("Intermediate write of {bytes_len}");
+        byte_count += bytes_len;
+    }
+
+    Ok(byte_count)
+}
 
 
 
