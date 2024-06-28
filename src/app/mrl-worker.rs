@@ -114,7 +114,8 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let mut content = String::new(); 
 
     for kv in &output_data {
-        content.push_str(&format!("{}\t{}\n", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value)));
+        // println!("k: {:?} || v: {}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value));
+        content.push_str(&format!("{}", String::from_utf8_lossy(&kv.value)));
     }
 
     match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
@@ -214,56 +215,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Sleep for a short period before checking for the next task
         sleep(Duration::from_secs(1)).await;
     }
-
-    // // Listen for tasks
-    // loop {
-    //     println!("Sending a request for a job!");
-    //     let resp = client.get_task(Request::new(WorkerRequest {  })).await;
-    //     match resp {
-    //         Ok(t) => {
-    //             let task = t.into_inner();
-    //             let job = Job {
-    //                 input: task.input.clone(),
-    //                 workload: task.workload.clone(),
-    //                 output: task.output.clone(),
-    //                 args: Vec::new()
-    //             };
-    //             let _ = sleep(Duration::from_secs(1)).await;
-    //             // if it is a mapPhase -> call map
-    //             // if it is a ReducePhase -> call reduce
-    //             let task_complete = match task.status.clone() {
-    //                 s if s==format!("Map") => {
-    //                     map(&s3_client, &job).await
-    //                 }
-    //                 s if s==format!("Reduce") => {
-    //                     reduce(&s3_client, &job).await
-    //                 }
-    //                 _ => {
-    //                     // should not reach here
-    //                     eprintln!("Invalid task assigned!");
-    //                     map(&s3_client, &job).await
-    //                 }
-    //             };
-    //             match task_complete {
-    //                 Ok(_) => {
-    //                     client.report_task(Request::new(WorkerReport { 
-    //                         task: task.status.clone(),
-    //                         input: task.input.clone(),
-    //                         output: task.output.clone(),
-    //                     })).await;
-    //                 }
-    //                 Err(err) => {
-    //                     // should not occur.... just saying :/
-    //                     eprintln!("{:?}", err)
-    //                 }
-    //             }
-    //         }
-    //         Err(e) => {
-    //             // no task
-    //             let _ = sleep(Duration::from_secs(1)).await;
-    //         }
-    //     }
-    // }
 }
 
 /* 
