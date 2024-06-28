@@ -2094,6 +2094,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-s3",
  "aws-sig-auth",
+ "aws-smithy-types 1.2.0",
  "aws-types 0.56.1",
  "aws_auth",
  "bytes",

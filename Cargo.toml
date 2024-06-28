@@ -38,6 +38,7 @@ tracing = "0.1.40"
 encoding_rs = "0.8.34"
 arrow = "52.0.0"
 parquet = { version = "52.0.0", features = ["arrow"] }
+aws-smithy-types = "1.2.0"
 
 
 [[bin]]
