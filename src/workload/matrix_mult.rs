@@ -97,3 +97,17 @@ pub fn map_stage_two(kv: KeyValue, _aux: Bytes) -> MapOutput {
 
     Ok(Box::new(map_output.into_iter().map(Ok)))
 }
+
+// Reduce function for the second stage
+pub fn reduce_stage_two(key: Bytes, values: Box<dyn Iterator<Item = Bytes> + '_>, _aux: Bytes) -> Result<Bytes> {
+    let mut sum = 0.0;
+
+    for value in values {
+        let value_str = String::from_utf8(value.to_vec())?;
+        let value: f64 = value_str.parse()?;
+        sum += value;
+    }
+
+    let result = format!("{} C", sum);
+    Ok(Bytes::from(result))
+}
