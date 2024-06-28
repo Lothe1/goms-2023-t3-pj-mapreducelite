@@ -8,9 +8,11 @@ use aws_config::Region;
 use std::{fs::File, io::Write, path::PathBuf, process::exit};
 
 use aws_sdk_s3::Client;
+use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::Bucket;
 use aws_sdk_s3::types::ReplicationStatus::Failed;
 use clap::Parser;
+use parquet::file::reader::Length;
 use tracing::trace;
 
 
@@ -176,6 +178,32 @@ pub async fn list_files_with_prefix(client: &Client, bucket: &str, prefix: &str)
         objects.push(object.key.unwrap_or_default());
     }
     Ok(objects)
+}
+
+pub async fn upload_par(client: &Client, bucket: &str, filename: &str)-> Result<(), Box<dyn std::error::Error>> {
+    let multipart_upload = client.create_multipart_upload().bucket(bucket).key(filename).send().await?;
+    let part_size = 1 * 1024 * 1024; // Setting part of Object to 1MB
+    let mut file = File::open(filename).unwrap();
+    let file_length = file.len();
+    let mut num_of_parts = file_length / part_size;
+    if (file_length % part_size > 0) {
+        num_of_parts = num_of_parts + 1;
+    }
+    for i in 0..num_of_parts {
+        let start = i* part_size;
+        let end = std::cmp::min((i+1)* part_size, file_length);
+        let part = &file[start..end];
+        let upload_request = client.upload_part()
+            .bucket(bucket)
+            .key(filename)
+            .upload_id(multipart_upload.upload_id.as_ref().unwrap())
+            .part_number((i+1) as i32)
+            .body(ByteStream::from(part.to_vec()));
+        upload_request.send().await?;
+
+    }
+    Ok(())
+
 }
 
 
