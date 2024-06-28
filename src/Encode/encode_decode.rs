@@ -110,7 +110,7 @@ fn arr_to_vec(binary_array: &BinaryArray) -> Vec<Bytes> {
         }
         return ret;
 }
-fn read_parquet(filename: &str)-> (Vec<Bytes>, Vec<Bytes>){
+pub fn read_parquet(filename: &str) -> (Vec<Bytes>, Vec<Bytes>){
         //Will explode if you have more than one collumn
         let file = File::open(filename).unwrap();
         let builder = ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
