@@ -72,3 +72,28 @@ pub fn reduce(key: Bytes, values: Box<dyn Iterator<Item = Bytes> + '_>, _aux: By
     Ok(output.freeze())
 }
 
+// Map function for the second stage
+pub fn map_stage_two(kv: KeyValue, _aux: Bytes) -> MapOutput {
+    let content = String::from_utf8(kv.value.to_vec())?;
+    let mut map_output = Vec::new();
+
+    for line in content.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() != 3 {
+            continue;
+        }
+
+        let row = parts[0].to_string();
+        let col = parts[1].to_string();
+        let value = parts[2].to_string();
+
+        let key = format!("{} {}", row, col);
+        let kv = KeyValue {
+            key: Bytes::from(key), 
+            value: Bytes::from(value),
+        };
+        map_output.push(kv);
+    }
+
+    Ok(Box::new(map_output.into_iter().map(Ok)))
+}
