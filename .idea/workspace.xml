@@ -9,7 +9,6 @@
   <component name="ChangeListManager">
     <list default="true" id="e45907d0-62a3-4cf1-8d13-3074578d09ff" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/Encode/encode_decode.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/Encode/encode_decode.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/S3/minio.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/S3/minio.rs" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/app/mrl-worker.rs" beforeDir="false" afterPath="$PROJECT_DIR$/src/app/mrl-worker.rs" afterDir="false" />
     </list>
@@ -44,7 +43,7 @@
     "Cargo.Run mrl-ctl.executor": "Run",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.rust.reset.selective.auto.import": "true",
-    "git-widget-placeholder": "reduce2implementing",
+    "git-widget-placeholder": "main",
     "last_opened_file_path": "/Users/tath/Desktop/University/Guts of Modern System/goms-2023-t3-pj-mrl-catlover645",
     "node.js.detected.package.eslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",

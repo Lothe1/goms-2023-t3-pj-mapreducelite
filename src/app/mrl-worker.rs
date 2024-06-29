@@ -167,22 +167,23 @@ async fn map2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     // Store intermediate data back to S3 or a temporary location
     let _ = fs::create_dir_all(format!(".{}", job.output))?;
     let filename = now();
-    let temp_path = format!("{}{}",  job.output,filename);
+    let temp_path = format!("{}{}",  job.output, filename);
     // println!("{:?}", temp_path);
     let mut file_res = OpenOptions::new().write(true).create(true).open(&format!(".{temp_path}")); //File::create(&temp_path)?;
-
     // println!("{:?}", file_res);
     let mut file = file_res.unwrap();
     // println!("File created!");
-
     let mut writer = make_writer(&mut file);
-
     let (keys, values) = KeyValueList_to_KeyListandValueList(intermediate_data);
     append_parquet(&file, &mut writer, keys, values);
 
     writer.close().unwrap();
 
     upload_parts(&client, bucket_name, &temp_path).await.unwrap();
+
+    //remove the local file
+    fs::remove_file(&format!(".{temp_path}"))?;
+
 
     Ok(temp_path.to_string())
 }
@@ -196,6 +197,11 @@ async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
 
     // Fetch intermediate data from MinIO
     let content = minio::download_file(&client, bucket_name, object_name,"temp3123").await?;
+
+    // delete the intermediate data in minio
+    tokio::spawn(async move {
+        minio::delete_object(&client, bucket_name, object_name).await.unwrap();
+    });
 
     let (keys, values) = encode_decode::read_parquet("temp3123");
     let keys_values: Vec<_> = keys.into_iter().zip(values.into_iter()).collect();
@@ -220,7 +226,6 @@ async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
 
 
     for (key, values) in sorted_intermediate_data {
-
         let value_iter = Box::new(values.into_iter());
         let reduced_value = reduce_func(key.clone(), value_iter, serialized_args.clone())?;
         output_data.push(KeyValue { key: key.clone(), value: reduced_value });

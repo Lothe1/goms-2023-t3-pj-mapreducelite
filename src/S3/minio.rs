@@ -309,6 +309,19 @@ pub async fn download_file(client: &Client, bucket: &str, object: &str, tempfile
     Ok(byte_count)
 }
 
+async fn remove_object(client: &Client, bucket: &str, key: &str) -> Result<(), anyhow::Error> {
+    client
+        .delete_object()
+        .bucket(bucket)
+        .key(key)
+        .send()
+        .await?;
+
+    println!("Object deleted.");
+
+    Ok(())
+}
+
 
 
 // Example of listing file buckets
