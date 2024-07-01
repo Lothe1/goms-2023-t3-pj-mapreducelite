@@ -89,7 +89,7 @@ async fn map2(client: &Client, job: &Job, num_reduce_workers: u32) -> Result<Str
     Ok(job.output.clone())
 }
 
-async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
+async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error loading workload");
     let bucket_name = "mrl-lite";
     let object_name = &job.input;
@@ -207,7 +207,7 @@ async fn map(
     }
 
     //clean local files
-    // fs::remove_dir_all("/temp")?;
+    fs::remove_dir_all("./temp")?;
 
     //you can merge files with this
     // merge_files_under_prefix_and_cleanup(client: &Client, bucket: &str, prefix: &str, output_file: &str)
@@ -217,6 +217,77 @@ async fn map(
     Ok(bucket_paths.into_iter().collect_vec())
 }
 
+async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
+    let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error loading workload");
+    let bucket_name = "mrl-lite";
+    let job_input = job.input.clone();
+    let mut input = job_input.chars();
+    input.next();
+    let object_name = input.as_str();
+    println!("{:?}", object_name);
+
+    let files_in_bucket = minio::list_files_with_prefix(&client, &bucket_name, &object_name).await.unwrap();
+    println!("{:?}", files_in_bucket);
+    // let combined_input_fn = format!("{}/merged", &object_name);
+    // minio::merge_files_under_prefix_and_cleanup(&client, &bucket_name, &object_name, &combined_input_fn).await;
+
+    // Fetch intermediate data from MinIO
+    let mut key_value_vec: Vec<(Bytes, Bytes)> = Vec::new();
+    for file in &files_in_bucket {
+        let content = minio::download_file(&client, &bucket_name, &file,"temp3123").await?;
+
+        let (keys, values) = encode_decode::read_parquet("temp3123");
+        let mut keys_values: Vec<(Bytes, Bytes)> = keys.into_iter().zip(values.into_iter()).collect();
+        fs::remove_file("temp3123").expect("Failed to remove temp file");
+        key_value_vec.append(&mut keys_values);
+    }
+
+    // Intermediate data storage
+    let mut intermediate_data = HashMap::new();
+
+    for (key, value) in key_value_vec {
+        intermediate_data.entry(key).or_insert_with(Vec::new).push(value);
+    }
+
+    // Sort intermediate data by key
+    let mut sorted_intermediate_data: Vec<(Bytes, Vec<Bytes>)> = intermediate_data.into_iter().collect();
+    sorted_intermediate_data.sort_by(|a, b| a.0.cmp(&b.0));
+
+    // Reduce intermediate data
+    let mut output_data = Vec::new();
+    //Map reduce parse addition args
+    let serialized_args = Bytes::from(job.args.join(" "));
+    let reduce_func = engine.reduce_fn;
+
+
+    for (key, values) in sorted_intermediate_data {
+        let value_iter = Box::new(values.into_iter());
+        let reduced_value = reduce_func(key.clone(), value_iter, serialized_args.clone())?;
+        output_data.push(KeyValue { key: key.clone(), value: reduced_value });
+    }
+
+    // Prepare and upload the final output
+    let filename = now();
+    let mut content = String::new();
+    let output_file = format!("{}{}", job.output, filename);
+
+    for kv in &output_data {
+        let key = utils::string_from_bytes(kv.key.clone());
+        let value = utils::string_from_bytes(kv.value.clone());
+        let formatted = format!("{}", value.unwrap());
+        content.push_str(formatted.as_str());
+    }
+
+    match minio::upload_string(&client, bucket_name, &output_file, &content).await {
+        Ok(_) => println!("Uploaded to {}",output_file),
+        Err(e) => eprintln!("Failed to upload: {:?}", e),
+    }
+    // Delete intermediate files
+    for file in &files_in_bucket {
+        minio::delete_object(&client, &bucket_name, &file).await.unwrap();
+    }
+    Ok(filename.to_string())
+}
 
 
 #[tokio::main]
