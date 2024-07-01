@@ -168,6 +168,9 @@ fn get_file_index(file: &str, files: &Vec<String>) -> usize {
     files.iter().position(|f| f==file).unwrap()
 }
 
+fn contains_path(path: &str, files: &Vec<String>) -> bool {
+    files.contains(&path.to_string())
+}
 /// Used to check the status of a job and possibly inform whether or not 
 /// the job's status can be changed to the next level.
 fn check_all_file_states(files: &Vec<String>, file_status: &HashMap<String, FileStatus>) -> Option<JobStatus> {
@@ -585,7 +588,7 @@ impl Coordinator for CoordinatorService {
     async fn report_task(&self, request: Request<WorkerReport>) -> Result<Response<WorkerResponse>, Status> {
         println!("Worker reporting completion");
         let completed_file = request.get_ref().input.clone();
-        let out_file = request.get_ref().output.clone();
+        let out_paths = request.get_ref().output.clone();
         let mut job_q = self.job_queue.lock().unwrap();
         // If the file status is currently in MapPhase -> change file state to Shuffle
         // If the file status is currently in ReducePhase -> change file state to Completed
@@ -600,15 +603,30 @@ impl Coordinator for CoordinatorService {
                     status: next_state.clone(),
                     elapsed: 0,
                 };
-                let file_index = get_file_index(&completed_file, &in_files);
-                file_status.insert(out_file.clone(), new_status);
+                for path in out_paths {
+                    file_status.insert(path.clone(), new_status.clone());
+                    if !contains_path(&path, &file_names) {
+                        file_names.push(path.clone());
+                    }
+                }
                 file_status.remove(&completed_file);
-                file_names.push(out_file.clone());
+                let file_index: usize = get_file_index(&completed_file, &in_files);
                 file_names.remove(file_index);
                 let next_job_state = check_all_file_states(&file_names, &file_status).unwrap();
 
                 if job.status.ne(&next_job_state) {
                     println!("Changing job state to: {:?}", &next_job_state);
+                    // Get the intermediate files here
+                    // let mid_prefix = format!("temp/{}", &job.id);
+                    // let client = self.s3_client.clone();
+                    // let bkt = format!("mrl-lite");
+                    // let mid_files = tokio::spawn(async move {
+                    //     println!("{:?}", &format!("{}", mid_prefix));
+                    //     let file_list = list_files_with_prefix(&client, &bkt, &mid_prefix).await.unwrap();
+                    //     return file_list;
+                    //     // merge_files_under_prefix_and_cleanup(&client, &bkt, &mid_prefix, &format!("{}", &mid_prefix)).await.unwrap();
+                    // }); 
+                    // println!("{:?}", mid_files.is_finished());
                     let modified_job = Job {
                         id: job.id.clone(),
                         status: next_job_state,

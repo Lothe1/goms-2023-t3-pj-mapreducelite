@@ -24,7 +24,7 @@ message WorkerRequest {}
 message WorkerReport {
   string task = 1;
   string input = 2;
-  string output = 3;
+  repeated string output = 3;
 }
 
 message Task {
