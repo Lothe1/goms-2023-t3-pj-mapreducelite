@@ -416,11 +416,13 @@ impl Coordinator for CoordinatorService {
                     JobStatus::Completed => {
                         let mut completed_jobs = self.completed_jobs.lock().unwrap();
                         let client = self.s3_client.clone();
-                        let id = format!("/temp/{}/", job.id.clone());
+                        let prefix = format!("temp/{}/", job.id.clone());
                         completed_jobs.push_back(job);
                         println!("Job completed!");
                         tokio::spawn(async move {
-                            delete_object(&client, &format!("mrl-lite"), &format!("/temp/{}/", id)).await.unwrap();
+                            println!("{:?}", &format!("{}", prefix));
+                            remove_object_with_prefix(&client, &format!("mrl-lite"), &format!("{}", prefix),  &format!("{}", prefix)).await.unwrap();
+                            remove_object(&client, &format!("mrl-lite"), &format!("{}", prefix)).await.unwrap();
                         });                        
                         // delete_object(&self.s3_client, &format!("mrl-lite"), &format!("/temp/{}/", job.id)).await.unwrap();
 

@@ -309,7 +309,7 @@ pub async fn download_file(client: &Client, bucket: &str, object: &str, tempfile
     Ok(byte_count)
 }
 
-async fn remove_object(client: &Client, bucket: &str, key: &str) -> Result<(), anyhow::Error> {
+pub async fn remove_object(client: &Client, bucket: &str, key: &str) -> Result<(), anyhow::Error> {
     client
         .delete_object()
         .bucket(bucket)
@@ -322,12 +322,16 @@ async fn remove_object(client: &Client, bucket: &str, key: &str) -> Result<(), a
     Ok(())
 }
 
-async fn remove_object_with_prefix(client: &Client, bucket: &str, key: &str, prefix: &str) -> Result<(), anyhow::Error>{
+pub async fn remove_object_with_prefix(client: &Client, bucket: &str, key: &str, prefix: &str) -> Result<(), anyhow::Error>{
+    let files = list_files_with_prefix(&client, &bucket, &prefix);
     let mut objects = Vec::new();
     let resp = client.list_objects_v2().bucket(bucket).prefix(prefix).send().await?;
     for object in resp.contents.unwrap_or_default() {
-        objects.push(object.key.unwrap_or_default());
+        let key = object.key.unwrap_or_default();
+        println!("{:?}", key.clone());
+        objects.push(key);
     }
+    println!("{:?}", objects);
     for object in objects {
         remove_object(client, bucket, &object).await?;
     }
