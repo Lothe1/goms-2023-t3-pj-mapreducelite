@@ -29,11 +29,17 @@ mod mapreduce {
     tonic::include_proto!("mapreduce");
 }
 
-use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse};
+use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse, WorkerCountRequest, WorkerCountResponse};
 use mapreduce::coordinator_client::CoordinatorClient;
 use mrlite::Encode::encode_decode;
 use mrlite::Encode::encode_decode::{append_parquet, KeyValueList_to_KeyListandValueList, make_writer};
 use mrlite::S3::minio::upload_parts;
+
+async fn get_number_of_workers(coordinator_client: &mut CoordinatorClient<tonic::transport::Channel>) -> Result<i32, Box<dyn std::error::Error>> {
+    let request = tonic::Request::new(WorkerCountRequest {});
+    let response = coordinator_client.get_worker_count(request).await?;
+    Ok(response.into_inner().count)
+}
 
 async fn map2(client: &Client, job: &Job, num_reduce_workers: u32) -> Result<String, anyhow::Error> {
     let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
@@ -332,8 +338,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     args: task.args.clone().split_whitespace().map(String::from).collect(),
                 };
 
-                let num_workers = 2;
-
+                let num_workers = get_number_of_workers(&mut client).await.unwrap() as u32;
+                println!("{num_workers}");
                 // Process task based on its type
                 let out_fn = match task.status.as_str() {
                     "Map" => {

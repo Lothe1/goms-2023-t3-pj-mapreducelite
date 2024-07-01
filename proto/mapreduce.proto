@@ -9,6 +9,13 @@ service Coordinator {
   rpc ListJobs(JobListRequest) returns (JobList);
   rpc SystemStatus(Empty) returns (Status);
   rpc ReportTask(WorkerReport) returns (WorkerResponse);
+  rpc GetWorkerCount(WorkerCountRequest) returns (WorkerCountResponse);
+}
+
+message WorkerCountRequest {}
+
+message WorkerCountResponse {
+  int32 count = 1;
 }
 
 message WorkerRegistration {}
