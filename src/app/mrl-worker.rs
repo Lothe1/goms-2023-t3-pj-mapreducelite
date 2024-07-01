@@ -184,7 +184,7 @@ async fn map2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
 
     //remove the local file
     fs::remove_file(&format!(".{temp_path}"))?;
-
+    fs::create_dir_all(format!(".{}", job.output))?;
 
     Ok(temp_path.to_string())
 }
@@ -203,7 +203,7 @@ async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     // tokio::spawn(async move {
     //     minio::delete_object(&client, bucket_name, object_name).await.unwrap();
     // });
-    // minio::delete_object(&client, bucket_name, object_name).await.unwrap();
+    // minio::delete_object(&client, &bucket_name, &object_name).await.unwrap();
 
     let (keys, values) = encode_decode::read_parquet("temp3123");
     let keys_values: Vec<_> = keys.into_iter().zip(values.into_iter()).collect();
@@ -245,7 +245,7 @@ async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
         Ok(_) => println!("Uploaded to {}{}", job.output, filename),
         Err(e) => eprintln!("Failed to upload: {:?}", e),
     }
-
+    
     Ok(filename.to_string())
 }
 
