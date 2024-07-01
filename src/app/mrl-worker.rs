@@ -1,6 +1,7 @@
 // use anyhow::*;
 #![ allow(warnings)]
 use anyhow::Ok;
+use anyhow::Result;
 use aws_smithy_types::base64::encode;
 use cmd::coordinator::now;
 use itertools::Itertools;
@@ -152,7 +153,7 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     Ok(filename.to_string())
 }
 
-async fn get_number_of_workers(coordinator_client: &mut CoordinatorClient<tonic::transport::Channel>) -> Result<i32, Box<dyn std::error::Error>> {
+async fn get_number_of_workers(coordinator_client: &mut CoordinatorClient<Channel>) -> anyhow::Result<i32> {
     let request = tonic::Request::new(WorkerCountRequest {});
     let response = coordinator_client.get_worker_count(request).await?;
     Ok(response.into_inner().count)
@@ -277,7 +278,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Process task based on its type
                 let out_fn = match task.status.as_str() {
                     "Map" => {
-                        match map(&s3_client, &job, num_reduce_worker).await {
+                        match map(&s3_client, &job, num_reduce_worker,).await {
                             Ok(name) => Some(name),
                             Err(err) => {
                                 eprintln!("Error during map task: {:?}", err);
