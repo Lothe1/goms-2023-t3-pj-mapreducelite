@@ -40,11 +40,11 @@ pub fn try_named(name: &str) -> Option<Workload> {
             map_fn: vertex_degree::map,
             reduce_fn: vertex_degree::reduce,
         }),
-        "matrix-multiply-stage-one" => Some(Workload {
+        "mm-one" => Some(Workload {
             map_fn: matrix_mult::map_stage_one,
             reduce_fn: matrix_mult::reduce_stage_one,
         }),
-        "matrix-multiply-stage-two" => Some(Workload {
+        "mm-two" => Some(Workload {
             map_fn: matrix_mult::map_stage_two,
             reduce_fn: matrix_mult::reduce_stage_two,
         }),

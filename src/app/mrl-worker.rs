@@ -198,10 +198,11 @@ async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     // Fetch intermediate data from MinIO
     let content = minio::download_file(&client, bucket_name, object_name,"temp3123").await?;
 
-    // delete the intermediate data in minio
-    tokio::spawn(async move {
-        minio::delete_object(&client, bucket_name, object_name).await.unwrap();
-    });
+    // // delete the intermediate data in minio
+    // tokio::spawn(async move {
+    //     minio::delete_object(&client, bucket_name, object_name).await.unwrap();
+    // });
+    // minio::delete_object(&client, bucket_name, object_name).await.unwrap();
 
     let (keys, values) = encode_decode::read_parquet("temp3123");
     let keys_values: Vec<_> = keys.into_iter().zip(values.into_iter()).collect();
@@ -236,8 +237,7 @@ async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let mut content = String::new();
 
     for kv in &output_data {
-        // println!("k: {:?} || v: {}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value));
-        content.push_str(&format!("{}\t{}\n", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value)));
+        content.push_str(&format!("{}", String::from_utf8_lossy(&kv.value)));
     }
 
     match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
@@ -305,7 +305,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     "Reduce" => {
-                        match reduce(&s3_client, &job).await {
+                        match reduce2(&s3_client, &job).await {
                             Ok(name) => Some(name),
                             Err(err) => {
                                 eprintln!("Error during reduce task: {:?}", err);
