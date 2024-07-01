@@ -69,6 +69,7 @@ async fn map(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
         writeln!(file, "{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value))?;
         content = format!("{content}\n{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value));
     }
+    
 
 
 

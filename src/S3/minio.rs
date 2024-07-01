@@ -322,6 +322,14 @@ async fn remove_object(client: &Client, bucket: &str, key: &str) -> Result<(), a
     Ok(())
 }
 
+async fn remove_object(client: &Client, bucket: &str, key: &str, prefix: &str) -> Result<(), anyhow::Error>{
+    let objects = list_files_with_prefix(client, bucket, prefix).await?;
+    for object in objects {
+        remove_object(client, bucket, &object).await?;
+    }
+    Ok(())
+}
+
 
 
 // Example of listing file buckets
