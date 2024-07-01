@@ -1,6 +1,5 @@
 // use anyhow::*;
 #![ allow(warnings)]
-use anyhow::Ok;
 use anyhow::Result;
 use aws_smithy_types::base64::encode;
 use cmd::coordinator::now;
