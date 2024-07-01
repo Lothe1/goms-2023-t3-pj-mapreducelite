@@ -415,8 +415,14 @@ impl Coordinator for CoordinatorService {
                     }
                     JobStatus::Completed => {
                         let mut completed_jobs = self.completed_jobs.lock().unwrap();
+                        let client = self.s3_client.clone();
+                        let id = format!("/temp/{}/", job.id.clone());
                         completed_jobs.push_back(job);
                         println!("Job completed!");
+                        tokio::spawn(async move {
+                            delete_object(&client, &format!("mrl-lite"), &format!("/temp/{}/", id)).await.unwrap();
+                        });                        
+                        // delete_object(&self.s3_client, &format!("mrl-lite"), &format!("/temp/{}/", job.id)).await.unwrap();
 
                         let mut workers = self.workers.lock().unwrap();
                         workers.insert(worker_addr, WorkerNode { state: WorkerState::Idle, addr: worker_addr.clone(), elapsed: now() });
