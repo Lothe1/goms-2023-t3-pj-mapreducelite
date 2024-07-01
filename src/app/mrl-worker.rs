@@ -1,6 +1,5 @@
 // use anyhow::*;
 #![ allow(warnings)]
-use anyhow::Result;
 use aws_smithy_types::base64::encode;
 use cmd::coordinator::now;
 use itertools::Itertools;
@@ -13,7 +12,7 @@ use tokio::time::sleep;
 use tonic::{Request, Response};
 use tonic::{transport::Server, Status};
 use tonic::transport::Channel;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write, BufRead};
 use std::sync::{Arc, Mutex};
@@ -30,13 +29,13 @@ mod mapreduce {
     tonic::include_proto!("mapreduce");
 }
 
-use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse, WorkerCountRequest, WorkerCountResponse};
+use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse};
 use mapreduce::coordinator_client::CoordinatorClient;
 use mrlite::Encode::encode_decode;
 use mrlite::Encode::encode_decode::{append_parquet, KeyValueList_to_KeyListandValueList, make_writer};
 use mrlite::S3::minio::upload_parts;
 
-async fn map(client: &Client, job: &Job, num_reduce_workers: u32) -> Result<String, anyhow::Error> {
+async fn map2(client: &Client, job: &Job, num_reduce_workers: u32) -> Result<String, anyhow::Error> {
     let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
     let bucket_name = "mrl-lite";
     let object_name = &job.input;
@@ -152,22 +151,14 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     Ok(filename.to_string())
 }
 
-async fn get_number_of_workers(coordinator_client: &mut CoordinatorClient<Channel>) -> anyhow::Result<i32> {
-    let request = tonic::Request::new(WorkerCountRequest {});
-    let response = coordinator_client.get_worker_count(request).await?;
-    Ok(response.into_inner().count)
-}
-
 type BucketIndex = u32;
 type Buckets = DashMap<BucketIndex, Vec<KeyValue>>;
 
-async fn perform_map(
-    job: &Job,
-    engine: &Workload,
-    serialized_args: &Bytes,
-    num_reduce_worker: u32,
+async fn map(
     client: &Client,
-)-> Result<(), anyhow::Error> {
+    job: &Job,
+    num_reduce_worker: u32
+)-> Result<Vec<String>, anyhow::Error> {
 
     let buckets: Buckets = Buckets::new();
 
@@ -176,55 +167,54 @@ async fn perform_map(
     let s3_object_name = &job.input;
     let content = minio::get_object(&client, s3_bucket_name, s3_object_name).await?;
     let parsed_content: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-
+    let serialized_args = Bytes::from(job.args.join(" "));
     
     let filename = s3_object_name.clone();
-    let mut buf = Vec::new();
-    let buf = Bytes::from(buf);
+    // let mut buf = Vec::new();
+    let buf = Bytes::from(content);
     let input_kv = KeyValue {
         key: Bytes::from(filename),
         value: buf,
     };
-
+    println!("{:?}", input_kv);
     let map_func = engine.map_fn;
 
+    let mut bucket_paths: HashSet<String> = HashSet::new();
     for item in map_func(input_kv, serialized_args.clone())? {
-            let KeyValue { key, value } = item?;
-            let bucket_no = ihash(&key) % num_reduce_worker;
-
-            #[allow(clippy::unwrap_or_default)]
-            buckets
-                .entry(bucket_no)
-                .or_insert(Vec::new())
-                .push(KeyValue { key, value });
+        let KeyValue { key, value } = item?;
+        let bucket_no = ihash(&key) % num_reduce_worker;
+        let _ = fs::create_dir_all(format!(".{}{}", job.output, bucket_no))?;
+        bucket_paths.insert(format!("{}{}", job.output, bucket_no));
+        #[allow(clippy::unwrap_or_default)]
+        buckets
+            .entry(bucket_no)
+            .or_insert(Vec::new())
+            .push(KeyValue { key, value });
     }
-
+    println!("Buckets: {:?}", buckets);
     //Now under bucket subdirectory we upload the intermediate data from this worker
    
     for (bucket_no, key_values) in buckets.into_iter() {
         for kv in key_values.iter() {
             let filename = Uuid::new_v4().to_string();
-            let filename = filename.as_str();
-            let object_name = format!("{}/{}/{}", "temp",bucket_no, filename);
-
+            let object_name = format!("{}{}/{}", &job.output,bucket_no, filename);
+            println!("{}", &object_name);
             let (keys, values): (Vec<Bytes>, Vec<Bytes>) = KeyValueList_to_KeyListandValueList(key_values.clone());
             //cheese method cuz has to be the same name
-            encode_decode::write_parquet(object_name.as_str(), keys, values);
+            encode_decode::write_parquet(&format!(".{}", object_name), keys, values);
             upload_parts(&client, s3_bucket_name, &object_name).await.unwrap();
-        
-            }
-                
+        }
     }
 
     //clean local files
-    fs::remove_dir_all("/temp")?;
+    // fs::remove_dir_all("/temp")?;
 
     //you can merge files with this
     // merge_files_under_prefix_and_cleanup(client: &Client, bucket: &str, prefix: &str, output_file: &str)
     // the prefix should be like temp/{bucketname} output_file should be like temp/{bucketname}.parquet
 
 
-    Ok(())
+    Ok(bucket_paths.into_iter().collect_vec())
 }
 
 
@@ -253,9 +243,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let s3_pw = s3_args.args.get("pw").unwrap().clone();
     println!("s3: {} {} {}\n", s3_ip, s3_user, s3_pw);
 
-    // Get number of reduce workers
-    let num_reduce_worker = get_number_of_workers(&mut client).await.unwrap() as u32;
-
     // Initialize S3 client
     let s3_client = minio::get_min_io_client(s3_ip.clone(), s3_user.clone(), s3_pw.clone()).await?;  
 
@@ -274,11 +261,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     args: task.args.clone().split_whitespace().map(String::from).collect(),
                 };
 
+                let num_workers = 2;
+
                 // Process task based on its type
                 let out_fn = match task.status.as_str() {
                     "Map" => {
-                        match map(&s3_client, &job, num_reduce_worker,).await {
-                            Ok(name) => Some(name),
+                        match map(&s3_client, &job, num_workers).await {
+                            Ok(paths) => Some(paths),
                             Err(err) => {
                                 eprintln!("Error during map task: {:?}", err);
                                 None
@@ -287,7 +276,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     "Reduce" => {
                         match reduce(&s3_client, &job).await {
-                            Ok(name) => Some(name),
+                            Ok(name) => Some(vec![name]),
                             Err(err) => {
                                 eprintln!("Error during reduce task: {:?}", err);
                                 None
@@ -305,7 +294,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let report = Request::new(WorkerReport {
                         task: task.status,
                         input: task.input,
-                        output: format!("{}", out_fn.unwrap()),
+                        output: out_fn.unwrap(),
                     });
                     if let Err(err) = client.report_task(report).await {
                         eprintln!("Error reporting task completion: {:?}", err);
