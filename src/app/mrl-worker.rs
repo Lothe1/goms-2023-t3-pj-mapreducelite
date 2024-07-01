@@ -26,13 +26,13 @@ mod mapreduce {
     tonic::include_proto!("mapreduce");
 }
 
-use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse};
+use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse, WorkerCountRequest, WorkerCountResponse};
 use mapreduce::coordinator_client::CoordinatorClient;
 use mrlite::Encode::encode_decode;
 use mrlite::Encode::encode_decode::{append_parquet, KeyValueList_to_KeyListandValueList, make_writer};
 use mrlite::S3::minio::upload_parts;
 
-async fn map(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
+async fn map(client: &Client, job: &Job, num_reduce_workers: u32) -> Result<String, anyhow::Error> {
     let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
     let bucket_name = "mrl-lite";
     let object_name = &job.input;
@@ -44,38 +44,46 @@ async fn map(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
         value: Bytes::from(content),
     };
     // println!("{:?}", input_kv.key);
+
     let serialized_args = Bytes::from(job.args.join(" "));
     let map_func = engine.map_fn;
 
-    let mut intermediate_data = Vec::new();
+    let mut intermediate_data = HashMap::new();
+
     for item in map_func(input_kv, serialized_args.clone())? {
         let kv = item?;
-        intermediate_data.push(kv);
+        let hashed_key = ihash(&kv.key.as_ref()) % num_reduce_workers;
+        let temp_path = format!(".{}/{}", job.output, hashed_key);
+
+        fs::create_dir_all(&temp_path)?;
+
+        let filename = now();
+        let file_path = format!("{}/{}", temp_path, filename);
+
+        let mut file = OpenOptions::new().write(true).create(true).open(&file_path)?;
+        let mut writer = make_writer(&mut file);
+
+        append_parquet(&file, &mut writer, vec![kv.key.clone()], vec![kv.value.clone()]);
+
+        writer.close().unwrap();
+
+        intermediate_data
+            .entry(hashed_key)
+            .or_insert_with(Vec::new)
+            .push(file_path);
     }
-    // println!("{:?}", intermediate_data); // works here
 
-    // Store intermediate data back to S3 or a temporary location
-    let _ = fs::create_dir_all(format!(".{}", job.output))?;
-    let filename = now();
-    let temp_path = format!("{}{}",  job.output, filename);
-    // println!("{:?}", temp_path);
-    let mut file_res = OpenOptions::new().write(true).create(true).open(&format!(".{temp_path}")); //File::create(&temp_path)?;
-    // println!("{:?}", file_res);
-    let mut file = file_res.unwrap();
-    // println!("File created!");
-    let mut writer = make_writer(&mut file);
-    let (keys, values) = KeyValueList_to_KeyListandValueList(intermediate_data);
-    append_parquet(&file, &mut writer, keys, values);
+    // Upload files to S3
+    for (hashed_key, file_paths) in intermediate_data {
+        for file_path in file_paths {
+            let filename = file_path.split('/').last().unwrap_or("");
+            let s3_path = format!("{}/{}/{}", job.output, hashed_key, filename);
+            upload_parts(&client, bucket_name, &s3_path).await;
+            fs::remove_file(&file_path)?;
+        }
+    }
 
-    writer.close().unwrap();
-
-    upload_parts(&client, bucket_name, &temp_path).await.unwrap();
-
-    //remove the local file
-    fs::remove_file(&format!(".{temp_path}"))?;
-    fs::create_dir_all(format!(".{}", job.output))?;
-
-    Ok(temp_path.to_string())
+    Ok(job.output.clone())
 }
 
 async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
@@ -83,7 +91,6 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let bucket_name = "mrl-lite";
     let object_name = &job.input;
     println!("{:?}", object_name);
-
 
     // Fetch intermediate data from MinIO
     let content = minio::download_file(&client, bucket_name, object_name,"temp3123").await?;
@@ -138,7 +145,11 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     Ok(filename.to_string())
 }
 
-
+async fn get_number_of_workers(coordinator_client: &mut CoordinatorClient<tonic::transport::Channel>) -> Result<i32, Box<dyn std::error::Error>> {
+    let request = tonic::Request::new(WorkerCountRequest {});
+    let response = coordinator_client.get_worker_count(request).await?;
+    Ok(response.into_inner().count)
+}
 
 
 #[tokio::main]
@@ -165,6 +176,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let s3_pw = s3_args.args.get("pw").unwrap().clone();
     println!("s3: {} {} {}\n", s3_ip, s3_user, s3_pw);
 
+    // Get number of reduce workers
+    let num_reduce_worker = get_number_of_workers(&mut client).await.unwrap() as u32;
+
     // Initialize S3 client
     let s3_client = minio::get_min_io_client(s3_ip.clone(), s3_user.clone(), s3_pw.clone()).await?;  
 
@@ -186,7 +200,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Process task based on its type
                 let out_fn = match task.status.as_str() {
                     "Map" => {
-                        match map(&s3_client, &job).await {
+                        match map(&s3_client, &job, num_reduce_worker).await {
                             Ok(name) => Some(name),
                             Err(err) => {
                                 eprintln!("Error during map task: {:?}", err);
