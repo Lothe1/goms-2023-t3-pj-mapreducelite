@@ -32,7 +32,7 @@ mod mapreduce {
 use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse, WorkerCountRequest, WorkerCountResponse};
 use mapreduce::coordinator_client::CoordinatorClient;
 use mrlite::Encode::encode_decode;
-use mrlite::Encode::encode_decode::{append_parquet, KeyValueList_to_KeyListandValueList, make_writer};
+use mrlite::Encode::encode_decode::{append_parquet, key_value_list_to_key_listand_value_list, make_writer};
 use mrlite::S3::minio::upload_parts;
 
 async fn get_number_of_workers(coordinator_client: &mut CoordinatorClient<tonic::transport::Channel>) -> Result<i32, Box<dyn std::error::Error>> {
@@ -205,7 +205,7 @@ async fn map(
             let filename = Uuid::new_v4().to_string();
             let object_name = format!("{}{}/{}", &job.output,bucket_no, filename);
             println!("{}", &object_name);
-            let (keys, values): (Vec<Bytes>, Vec<Bytes>) = KeyValueList_to_KeyListandValueList(key_values.clone());
+            let (keys, values): (Vec<Bytes>, Vec<Bytes>) = key_value_list_to_key_listand_value_list(key_values.clone());
             //cheese method cuz has to be the same name
             encode_decode::write_parquet(&format!(".{}", object_name), keys, values);
             upload_parts(&client, s3_bucket_name, &object_name).await.unwrap();

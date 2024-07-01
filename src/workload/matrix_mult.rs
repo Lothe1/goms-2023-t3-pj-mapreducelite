@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::*;
-use anyhow::{anyhow, Result};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use anyhow::Result;
+use bytes::{BufMut, Bytes, BytesMut};
 
 // Map function for the first stage
 pub fn map_stage_one(kv: KeyValue, _aux: Bytes) -> MapOutput {
@@ -40,7 +40,7 @@ pub fn map_stage_one(kv: KeyValue, _aux: Bytes) -> MapOutput {
 }
 
 // Reduce function for the first stage
-pub fn reduce_stage_one(key: Bytes, values: Box<dyn Iterator<Item = Bytes> + '_>, _aux: Bytes) -> Result<Bytes> {
+pub fn reduce_stage_one(_key: Bytes, values: Box<dyn Iterator<Item = Bytes> + '_>, _aux: Bytes) -> Result<Bytes> {
     let mut map_a = HashMap::new();
     let mut map_b = HashMap::new();
 
@@ -99,7 +99,7 @@ pub fn map_stage_two(kv: KeyValue, _aux: Bytes) -> MapOutput {
 }
 
 // Reduce function for the second stage
-pub fn reduce_stage_two(key: Bytes, values: Box<dyn Iterator<Item = Bytes> + '_>, _aux: Bytes) -> Result<Bytes> {
+pub fn reduce_stage_two(_key: Bytes, values: Box<dyn Iterator<Item = Bytes> + '_>, _aux: Bytes) -> Result<Bytes> {
     let mut sum = 0.0;
 
     for value in values {

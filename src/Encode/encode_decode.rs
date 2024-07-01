@@ -1,27 +1,17 @@
+#![allow(warnings)]
 use std::fs::File;
-use std::path::Path;
 use std::sync::Arc;
 use parquet::arrow::ArrowWriter;
-use arrow::array::{Int32Array, ArrayRef, PrimitiveArray, Array};
+use arrow::array::{ArrayRef, Array};
 
 use arrow::array::BinaryArray;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow::record_batch::RecordBatch;
-use aws_sdk_s3::Client;
-use aws_sdk_s3::operation::create_multipart_upload::CreateMultipartUploadOutput;
-use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use bytes::Bytes;
-use std::error::Error;
-use std::io::prelude::*;
-use aws_smithy_types::byte_stream::{ByteStream, Length};
 
-
-use std::process;
-use aws_sdk_s3::config::{Builder, Credentials};
-use uuid::Uuid;
 use crate::KeyValue;
 
 // fn main() {
@@ -167,7 +157,7 @@ pub fn combine_parquets(input_files: Vec<&str>, output_file: &str) -> (){
         // append_parquet
         // writer.close().unwrap();
 // }
-pub fn append_parquet(file: &File, writer: &mut ArrowWriter<File>, key: Vec<Bytes>, value: Vec<Bytes>){
+pub fn append_parquet(_file: &File, writer: &mut ArrowWriter<File>, key: Vec<Bytes>, value: Vec<Bytes>){
         let key: Vec<&[u8]> = key.iter().map(|b| b.as_ref()).collect();
         let vals: Vec<&[u8]> = value.iter().map(|b| b.as_ref()).collect();
         let ids = BinaryArray::from(key);
@@ -185,7 +175,7 @@ pub fn append_parquet(file: &File, writer: &mut ArrowWriter<File>, key: Vec<Byte
                 ],
         ).unwrap();
         // WriterProperties can be used to set Parquet file options
-        let props = WriterProperties::builder()
+        let _props = WriterProperties::builder()
             .set_compression(Compression::SNAPPY)
             .build();
         // println!("Schema is: {:?}", batch.schema());
@@ -207,7 +197,7 @@ pub fn make_writer(file: & File) -> ArrowWriter<File>{
         return ArrowWriter::try_new(cloned_file, batch.schema(), Some(props)).unwrap();
 }
 
-pub fn KeyValueList_to_KeyListandValueList(kv_list: Vec<KeyValue>) -> (Vec<Bytes>, Vec<Bytes>){
+pub fn key_value_list_to_key_listand_value_list(kv_list: Vec<KeyValue>) -> (Vec<Bytes>, Vec<Bytes>){
         let mut key_list = Vec::new();
         let mut value_list = Vec::new();
         for kv in kv_list{
