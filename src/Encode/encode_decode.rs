@@ -71,7 +71,7 @@ fn batch_reading_parquet(filename: &str, start: usize, batch_size: usize) -> (Ve
         return (ret_key, ret_value);
 
 }
-fn write_parquet(filename:&str, key: Vec<Bytes>, value: Vec<Bytes>){
+pub fn write_parquet(filename:&str, key: Vec<Bytes>, value: Vec<Bytes>){
         let file = File::create(filename).unwrap();
         let key: Vec<&[u8]> = key.iter().map(|b| b.as_ref()).collect();
         let vals: Vec<&[u8]> = value.iter().map(|b| b.as_ref()).collect();
@@ -128,7 +128,7 @@ pub fn read_parquet(filename: &str) -> (Vec<Bytes>, Vec<Bytes>){
 
 }
 
-fn combine_parquets(input_files: Vec<&str>, output_file: &str) -> (){
+pub fn combine_parquets(input_files: Vec<&str>, output_file: &str) -> (){
         let file = File::create(output_file).unwrap();
         let fields = vec![
                 Field::new("id", DataType::Binary, false),

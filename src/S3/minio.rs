@@ -1,6 +1,7 @@
 #![allow(warnings)]
 use aws_config::from_env;
 use aws_sdk_s3 as s3;
+use itertools::merge;
 use std::error::Error;
 use aws_sdk_s3::config::{Builder, Credentials};
 use aws_config::Region;
@@ -17,6 +18,8 @@ use clap::Parser;
 use parquet::file::reader::Length;
 use tracing::trace;
 use uuid::Uuid;
+
+use crate::Encode::encode_decode::combine_parquets;
 
 
 pub async fn create_directory(client: &Client, bucket: &str, directory: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -295,7 +298,6 @@ pub async fn download_file(client: &Client, bucket: &str, object: &str, tempfile
         .send()
         .await?;
 
-
     let mut file = File::create(tempfilename)?;
 
     let mut byte_count = 0_usize;
@@ -338,6 +340,43 @@ pub async fn remove_object_with_prefix(client: &Client, bucket: &str, key: &str,
     Ok(())
 }
 
+
+use tokio::fs;
+
+async fn remove_file(path: &str) -> std::io::Result<()> {
+    fs::remove_file(path).await
+}
+pub async fn merge_files_under_prefix_and_cleanup(client: &Client, bucket: &str, prefix: &str, output_file: &str) -> Result<(), anyhow::Error> {
+    let mut input_files = Vec::new();
+    let resp = client.list_objects_v2().bucket(bucket).prefix(prefix).send().await?;
+    for object in resp.contents.unwrap_or_default() {
+        input_files.push(object.key.unwrap_or_default());
+    }
+    let mut count = 0;
+ 
+    for file in input_files {
+        download_file(client, bucket, file.as_str(), count.to_string().as_str());
+        let count_str = count.clone().to_string();
+
+        count += 1;
+    }
+    let strings: Vec<String> = (0..count).map(|x| x.to_string()).collect();
+    let localfiles: Vec<&str> = strings.iter().map(AsRef::as_ref).collect();
+    //Make parquet locally 
+    combine_parquets(localfiles.clone(), output_file);
+
+    //remove objects in s3 with prefix
+    remove_object_with_prefix(client, bucket, prefix, prefix).await?;
+
+    //remove localfile 
+    for file in localfiles {
+        fs::remove_file(&file).await?;
+    }
+
+    upload_parts(client, bucket, output_file);
+    
+    Ok(())
+}
 
 
 // Example of listing file buckets

@@ -1,5 +1,7 @@
 // use anyhow::*;
 #![ allow(warnings)]
+use anyhow::Ok;
+use aws_smithy_types::base64::encode;
 use cmd::coordinator::now;
 use itertools::Itertools;
 use mrlite::*;
@@ -21,6 +23,8 @@ use std::time::Duration;
 use aws_sdk_s3::Client;
 use S3::minio;
 use standalone::Job;
+use dashmap::DashMap;
+use uuid::Uuid; 
 
 mod mapreduce {
     tonic::include_proto!("mapreduce");
@@ -32,116 +36,116 @@ use mrlite::Encode::encode_decode;
 use mrlite::Encode::encode_decode::{append_parquet, KeyValueList_to_KeyListandValueList, make_writer};
 use mrlite::S3::minio::upload_parts;
 
-async fn map(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
-    let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
-    let bucket_name = "mrl-lite";
-    let object_name = &job.input;
-    println!("{:?}", object_name);
+// async fn map(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
+//     let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
+//     let bucket_name = "mrl-lite";
+//     let object_name = &job.input;
+//     println!("{:?}", object_name);
 
-    let content = minio::get_object(&client, bucket_name, object_name).await?;
-    let input_kv = KeyValue {
-        key: Bytes::from(object_name.clone()),
-        value: Bytes::from(content),
-    };
-    // println!("{:?}", input_kv.key);
-    let serialized_args = Bytes::from(job.args.join(" "));
-    let map_func = engine.map_fn;
+//     let content = minio::get_object(&client, bucket_name, object_name).await?;
+//     let input_kv = KeyValue {
+//         key: Bytes::from(object_name.clone()),
+//         value: Bytes::from(content),
+//     };
+//     // println!("{:?}", input_kv.key);
+//     let serialized_args = Bytes::from(job.args.join(" "));
+//     let map_func = engine.map_fn;
 
-    let mut intermediate_data = Vec::new();
-    for item in map_func(input_kv, serialized_args.clone())? {
-        let kv = item?;
-        intermediate_data.push(kv);
-    }
-    // println!("{:?}", intermediate_data); // works here
+//     let mut intermediate_data = Vec::new();
+//     for item in map_func(input_kv, serialized_args.clone())? {
+//         let kv = item?;
+//         intermediate_data.push(kv);
+//     }
+//     // println!("{:?}", intermediate_data); // works here
 
-    // Store intermediate data back to S3 or a temporary location
-    let _ = fs::create_dir_all(format!(".{}", job.output))?;
-    let filename = now();
-    let temp_path = format!(".{}{}",  job.output,filename);
-    // println!("{:?}", temp_path);
-    let mut file_res = OpenOptions::new().write(true).create(true).open(&temp_path); //File::create(&temp_path)?;
-    // println!("{:?}", file_res);
-    let mut file = file_res.unwrap();
-    // println!("File created!");
-    let mut content = format!(""); 
-    for kv in &intermediate_data {
-        // println!("{:?}", &kv.value);
-        writeln!(file, "{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value))?;
-        content = format!("{content}\n{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value));
-    }
+//     // Store intermediate data back to S3 or a temporary location
+//     let _ = fs::create_dir_all(format!(".{}", job.output))?;
+//     let filename = now();
+//     let temp_path = format!(".{}{}",  job.output,filename);
+//     // println!("{:?}", temp_path);
+//     let mut file_res = OpenOptions::new().write(true).create(true).open(&temp_path); //File::create(&temp_path)?;
+//     // println!("{:?}", file_res);
+//     let mut file = file_res.unwrap();
+//     // println!("File created!");
+//     let mut content = format!(""); 
+//     for kv in &intermediate_data {
+//         // println!("{:?}", &kv.value);
+//         writeln!(file, "{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value))?;
+//         content = format!("{content}\n{}\t{}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value));
+//     }
     
 
 
 
-    match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
-        Ok(_) => println!("Uploaded"),
-        Err(e) => eprintln!("Failed to upload: {:?}", e),
-    }
+//     match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
+//         Ok(_) => println!("Uploaded"),
+//         Err(e) => eprintln!("Failed to upload: {:?}", e),
+//     }
 
-    Ok(filename.to_string())
-}
+//     Ok(filename.to_string())
+// }
 
 
-async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
-    let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error loading workload");
-    let bucket_name = "mrl-lite";
-    let object_name = &job.input;
-    println!("{:?}", object_name);
+// async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
+//     let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error loading workload");
+//     let bucket_name = "mrl-lite";
+//     let object_name = &job.input;
+//     println!("{:?}", object_name);
 
-    // Fetch intermediate data from MinIO
-    let content = minio::get_object(&client, bucket_name, object_name).await?;
-    let reader = io::BufReader::new(content.as_bytes());
+//     // Fetch intermediate data from MinIO
+//     let content = minio::get_object(&client, bucket_name, object_name).await?;
+//     let reader = io::BufReader::new(content.as_bytes());
 
-    // Intermediate data storage
-    let mut intermediate_data = HashMap::new();
+//     // Intermediate data storage
+//     let mut intermediate_data = HashMap::new();
 
-    // Read and parse intermediate data
-    for line in reader.lines() {
-        let line = line?;
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() == 2 {
-            let key = parts[0].to_string();
-            let value = parts[1].to_string();
-            intermediate_data.entry(key).or_insert_with(Vec::new).push(value);
-        }
-    }
+//     // Read and parse intermediate data
+//     for line in reader.lines() {
+//         let line = line?;
+//         let parts: Vec<&str> = line.split('\t').collect();
+//         if parts.len() == 2 {
+//             let key = parts[0].to_string();
+//             let value = parts[1].to_string();
+//             intermediate_data.entry(key).or_insert_with(Vec::new).push(value);
+//         }
+//     }
 
-    // Sort intermediate data by key
-    let mut sorted_intermediate_data: Vec<(String, Vec<String>)> = intermediate_data.into_iter().collect();
-    sorted_intermediate_data.sort_by(|a, b| a.0.cmp(&b.0));
+//     // Sort intermediate data by key
+//     let mut sorted_intermediate_data: Vec<(String, Vec<String>)> = intermediate_data.into_iter().collect();
+//     sorted_intermediate_data.sort_by(|a, b| a.0.cmp(&b.0));
 
-    // Reduce intermediate data
-    let mut output_data = Vec::new();
-    let serialized_args = Bytes::from(job.args.join(" "));
-    let reduce_func = engine.reduce_fn;
+//     // Reduce intermediate data
+//     let mut output_data = Vec::new();
+//     let serialized_args = Bytes::from(job.args.join(" "));
+//     let reduce_func = engine.reduce_fn;
 
-    for (key, values) in sorted_intermediate_data {
-        let kv = KeyValue {
-            key: Bytes::from(key.clone()),
-            value: Bytes::from(values.join(",")),
-        };
+//     for (key, values) in sorted_intermediate_data {
+//         let kv = KeyValue {
+//             key: Bytes::from(key.clone()),
+//             value: Bytes::from(values.join(",")),
+//         };
 
-        let value_iter = Box::new(values.into_iter().map(Bytes::from));
-        let reduced_value = reduce_func(Bytes::from(key.clone()), value_iter, serialized_args.clone())?;
-        output_data.push(KeyValue { key: Bytes::from(key.clone()), value: reduced_value });
-    }
+//         let value_iter = Box::new(values.into_iter().map(Bytes::from));
+//         let reduced_value = reduce_func(Bytes::from(key.clone()), value_iter, serialized_args.clone())?;
+//         output_data.push(KeyValue { key: Bytes::from(key.clone()), value: reduced_value });
+//     }
 
-    // Prepare and upload the final output
-    let filename = now();
-    let mut content = String::new();
+//     // Prepare and upload the final output
+//     let filename = now();
+//     let mut content = String::new();
 
-    for kv in &output_data {
-        // println!("k: {:?} || v: {}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value));
-        content.push_str(&format!("{}\t{}\n", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value)));
-    }
+//     for kv in &output_data {
+//         // println!("k: {:?} || v: {}", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value));
+//         content.push_str(&format!("{}\t{}\n", String::from_utf8_lossy(&kv.key), String::from_utf8_lossy(&kv.value)));
+//     }
 
-    match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
-        Ok(_) => println!("Uploaded to {}{}", job.output, filename),
-        Err(e) => eprintln!("Failed to upload: {:?}", e),
-    }
+//     match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
+//         Ok(_) => println!("Uploaded to {}{}", job.output, filename),
+//         Err(e) => eprintln!("Failed to upload: {:?}", e),
+//     }
 
-    Ok(filename.to_string())
-}
+//     Ok(filename.to_string())
+// }
 
 async fn map2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
@@ -151,8 +155,8 @@ async fn map2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
 
     let content = minio::get_object(&client, bucket_name, object_name).await?;
     let input_kv = KeyValue {
-        key: Bytes::from(object_name.clone()),
-        value: Bytes::from(content),
+        key: utils::string_to_bytes(object_name.clone()),
+        value: utils::string_to_bytes(content),
     };
     // println!("{:?}", input_kv.key);
     let serialized_args = Bytes::from(job.args.join(" "));
@@ -161,9 +165,10 @@ async fn map2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let mut intermediate_data = Vec::new();
     for item in map_func(input_kv, serialized_args.clone())? {
         let kv = item?;
+
         intermediate_data.push(kv);
     }
-    // println!("{:?}", intermediate_data); // works here
+    println!("{:?}", intermediate_data); // works here
 
     // Store intermediate data back to S3 or a temporary location
     let _ = fs::create_dir_all(format!(".{}", job.output))?;
@@ -194,8 +199,6 @@ async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let bucket_name = "mrl-lite";
     let object_name = &job.input;
     println!("{:?}", object_name);
-
-
     // Fetch intermediate data from MinIO
     let content = minio::download_file(&client, bucket_name, object_name,"temp3123").await?;
 
@@ -238,7 +241,10 @@ async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let mut content = String::new();
 
     for kv in &output_data {
-        content.push_str(&format!("{}\t{}", String::from_utf8_lossy(&kv.key),String::from_utf8_lossy(&kv.value)));
+        let key = utils::string_from_bytes(kv.key.clone());
+        let value = utils::string_from_bytes(kv.value.clone());
+        let formatted = format!("{:?}\t{:?}", key, value);
+        content.push_str(formatted.as_str());
     }
 
     match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
@@ -249,6 +255,74 @@ async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     Ok(filename.to_string())
 }
 
+type BucketIndex = u32;
+type Buckets = DashMap<BucketIndex, Vec<KeyValue>>;
+
+async fn perform_map(
+    job: &Job,
+    engine: &Workload,
+    serialized_args: &Bytes,
+    num_reduce_worker: u32,
+    client: &Client,
+)-> Result<(), anyhow::Error> {
+
+    let buckets: Buckets = Buckets::new();
+
+    let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
+    let s3_bucket_name = "mrl-lite";
+    let s3_object_name = &job.input;
+    let content = minio::get_object(&client, s3_bucket_name, s3_object_name).await?;
+    let parsed_content: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+
+    
+    let filename = s3_object_name.clone();
+    let mut buf = Vec::new();
+    let buf = Bytes::from(buf);
+    let input_kv = KeyValue {
+        key: Bytes::from(filename),
+        value: buf,
+    };
+
+    let map_func = engine.map_fn;
+
+    for item in map_func(input_kv, serialized_args.clone())? {
+            let KeyValue { key, value } = item?;
+            let bucket_no = ihash(&key) % num_reduce_worker;
+
+            #[allow(clippy::unwrap_or_default)]
+            buckets
+                .entry(bucket_no)
+                .or_insert(Vec::new())
+                .push(KeyValue { key, value });
+    }
+
+    //Now under bucket subdirectory we upload the intermediate data from this worker
+   
+    for (bucket_no, key_values) in buckets.into_iter() {
+        for kv in key_values.iter() {
+            let filename = Uuid::new_v4().to_string();
+            let filename = filename.as_str();
+            let object_name = format!("{}/{}/{}", "temp",bucket_no, filename);
+
+            let (keys, values): (Vec<Bytes>, Vec<Bytes>) = KeyValueList_to_KeyListandValueList(key_values.clone());
+            //cheese method cuz has to be the same name
+            encode_decode::write_parquet(object_name.as_str(), keys, values);
+            upload_parts(&client, s3_bucket_name, &object_name).await.unwrap();
+        
+            }
+                
+    }
+
+    //clean local files
+    fs::remove_dir_all("/temp")?;
+
+    //you can merge files with this
+    // merge_files_under_prefix_and_cleanup(client: &Client, bucket: &str, prefix: &str, output_file: &str)
+    // the prefix should be like temp/{bucketname} output_file should be like temp/{bucketname}.parquet
+
+
+    Ok(())
+}
 
 
 
