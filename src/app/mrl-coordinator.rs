@@ -18,7 +18,8 @@ mod mapreduce {
 }
 
 use mapreduce::coordinator_server::{Coordinator, CoordinatorServer};
-use mapreduce::{Empty, JobList, JobListRequest, JobRequest, JobResponse, Status as SystemStatus, Task, Worker, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse};
+use mapreduce::{Empty, JobList, JobListRequest, JobRequest, JobResponse, Status as SystemStatus, Task, 
+    Worker, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse, WorkerCountRequest, WorkerCountResponse};
 use mrlite::S3::minio::*;
 
 /* 
@@ -227,6 +228,13 @@ fn check_all_file_states(files: &Vec<String>, file_status: &HashMap<String, File
 
 #[tonic::async_trait]
 impl Coordinator for CoordinatorService {
+    
+    // Get the number of workers in the worker list
+    async fn get_worker_count(&self, _request: Request<WorkerCountRequest>) -> Result<Response<WorkerCountResponse>, Status> {
+        let workers = self.workers.lock().unwrap();
+        let count = workers.len() as i32;
+        Ok(Response::new(WorkerCountResponse { count }))
+    }
 
     // Register a worker with the coordinator
     // This function is called when a worker node wants to register itself with the coordinator. 
