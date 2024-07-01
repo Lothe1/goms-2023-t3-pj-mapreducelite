@@ -322,8 +322,12 @@ async fn remove_object(client: &Client, bucket: &str, key: &str) -> Result<(), a
     Ok(())
 }
 
-async fn remove_object(client: &Client, bucket: &str, key: &str, prefix: &str) -> Result<(), anyhow::Error>{
-    let objects = list_files_with_prefix(client, bucket, prefix).await?;
+async fn remove_object_with_prefix(client: &Client, bucket: &str, key: &str, prefix: &str) -> Result<(), anyhow::Error>{
+    let mut objects = Vec::new();
+    let resp = client.list_objects_v2().bucket(bucket).prefix(prefix).send().await?;
+    for object in resp.contents.unwrap_or_default() {
+        objects.push(object.key.unwrap_or_default());
+    }
     for object in objects {
         remove_object(client, bucket, &object).await?;
     }
