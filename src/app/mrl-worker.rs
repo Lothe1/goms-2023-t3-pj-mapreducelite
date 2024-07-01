@@ -238,7 +238,7 @@ async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let mut content = String::new();
 
     for kv in &output_data {
-        content.push_str(&format!("{}", String::from_utf8_lossy(&kv.value)));
+        content.push_str(&format!("{}\t{}", String::from_utf8_lossy(&kv.key),String::from_utf8_lossy(&kv.value)));
     }
 
     match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {

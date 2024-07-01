@@ -647,11 +647,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let os_user: String = args.user.unwrap_or_else(|| "ROOTNAME".into());
     let os_pw: String = args.pw.unwrap_or_else(|| "CHANGEME123".into());
     // Port to listen to
-    let addr = format!("127.0.0.1:{port}").parse().unwrap();
+    let addr = format!("0.0.0.0:{port}").parse().unwrap();
 
     // If having trouble connecting to minio vvvvvvvvv
-    let s3_client = get_local_minio_client().await; 
-    // let s3_client = get_min_io_client(format!("http://{}",os_ip.clone()), os_user.clone(), os_pw.clone()).await.unwrap();
+    // let s3_client = get_local_minio_client().await; 
+    let s3_client = get_min_io_client(format!("http://{}",os_ip.clone()), os_user.clone(), os_pw.clone()).await.unwrap();
     let coordinator = CoordinatorService::new(os_ip.clone(), os_user.clone(), os_pw.clone(), s3_client.clone());
 
     println!("Coordinator listening on {}", addr);
