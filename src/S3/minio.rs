@@ -298,7 +298,14 @@ pub async fn download_file(client: &Client, bucket: &str, object: &str, tempfile
         .send()
         .await?;
 
+    
+
+    let path = std::path::Path::new(tempfilename);
+    let prefix = path.parent().unwrap();
+    std::fs::create_dir_all(prefix)?;
     let mut file = File::create(tempfilename)?;
+
+
 
     let mut byte_count = 0_usize;
     while let Some(bytes) = object.body.try_next().await? {
