@@ -1,5 +1,5 @@
 #![allow(warnings)]
-use std::fs::File;
+use std::fs::{self, File, OpenOptions};
 use std::sync::Arc;
 use parquet::arrow::ArrowWriter;
 use arrow::array::{ArrayRef, Array};
@@ -12,6 +12,7 @@ use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use bytes::Bytes;
 
+use crate::cmd::coordinator::now;
 use crate::KeyValue;
 
 // fn main() {
@@ -101,6 +102,7 @@ fn arr_to_vec(binary_array: &BinaryArray) -> Vec<Bytes> {
         return ret;
 }
 pub fn read_parquet(filename: &str) -> (Vec<Bytes>, Vec<Bytes>){
+        println!("{}", filename);
         //Will explode if you have more than one collumn
         let file = File::open(filename).unwrap();
         let builder = ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
@@ -118,8 +120,13 @@ pub fn read_parquet(filename: &str) -> (Vec<Bytes>, Vec<Bytes>){
 
 }
 
-pub fn combine_parquets(input_files: Vec<&str>, output_file: &str) -> (){
-        let file = File::create(output_file).unwrap();
+pub fn combine_parquets(input_files: Vec<&str>, prefix: &str, output_file: &str) -> (){
+
+        fs::create_dir_all(&format!(".{}", prefix)).unwrap();
+        let filename = format!(".{}/{}", prefix, output_file);
+
+        let mut file = OpenOptions::new().write(true).create(true).open(&filename).unwrap();
+        // let file = File::create(output_file).unwrap();
         let fields = vec![
                 Field::new("id", DataType::Binary, false),
                 Field::new("val", DataType::Binary, false),

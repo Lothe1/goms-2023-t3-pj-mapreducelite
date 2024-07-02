@@ -182,14 +182,15 @@ async fn map(
         key: Bytes::from(filename),
         value: buf,
     };
-    println!("{:?}", input_kv);
+    // println!("{:?}", input_kv);
     let map_func = engine.map_fn;
 
     let mut bucket_paths: HashSet<String> = HashSet::new();
     for item in map_func(input_kv, serialized_args.clone())? {
         let KeyValue { key, value } = item?;
         let bucket_no = ihash(&key) % num_reduce_worker;
-        let _ = fs::create_dir_all(format!(".{}{}", job.output, bucket_no))?;
+        let path = format!(".{}{}", job.output, bucket_no);
+        let _ = fs::create_dir_all(path)?;
         bucket_paths.insert(format!("{}{}", job.output, bucket_no));
         #[allow(clippy::unwrap_or_default)]
         buckets
@@ -197,19 +198,19 @@ async fn map(
             .or_insert(Vec::new())
             .push(KeyValue { key, value });
     }
-    println!("Buckets: {:?}", buckets);
+    // println!("Buckets: {:?}", buckets);
     //Now under bucket subdirectory we upload the intermediate data from this worker
    
     for (bucket_no, key_values) in buckets.into_iter() {
-        for kv in key_values.iter() {
-            let filename = Uuid::new_v4().to_string();
-            let object_name = format!("{}{}/{}", &job.output,bucket_no, filename);
-            println!("{}", &object_name);
-            let (keys, values): (Vec<Bytes>, Vec<Bytes>) = key_value_list_to_key_listand_value_list(key_values.clone());
-            //cheese method cuz has to be the same name
-            encode_decode::write_parquet(&format!(".{}", object_name), keys, values);
-            upload_parts(&client, s3_bucket_name, &object_name).await.unwrap();
-        }
+        println!("Bucket [{bucket_no}] : {:?}", key_values);
+        let filename = Uuid::new_v4().to_string();
+        let object_name = format!("{}{}/{}", &job.output,bucket_no, filename);
+        println!("{}", &object_name);
+        let (keys, values): (Vec<Bytes>, Vec<Bytes>) = key_value_list_to_key_listand_value_list(key_values.clone());
+        println!("{:?}\n{:?}", keys, values);
+        //cheese method cuz has to be the same name
+        encode_decode::write_parquet(&format!(".{}", object_name), keys, values);
+        upload_parts(&client, s3_bucket_name, &object_name).await.unwrap();
     }
 
     //clean local files
@@ -243,7 +244,9 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
         let content = minio::download_file(&client, &bucket_name, &file,"temp3123").await?;
 
         let (keys, values) = encode_decode::read_parquet("temp3123");
+
         let mut keys_values: Vec<(Bytes, Bytes)> = keys.into_iter().zip(values.into_iter()).collect();
+        println!("{:?}", keys_values);
         fs::remove_file("temp3123").expect("Failed to remove temp file");
         key_value_vec.append(&mut keys_values);
     }
@@ -252,6 +255,7 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let mut intermediate_data = HashMap::new();
 
     for (key, value) in key_value_vec {
+        println!("{} {}", String::from_utf8_lossy(&key), String::from_utf8_lossy(&value));
         intermediate_data.entry(key).or_insert_with(Vec::new).push(value);
     }
 
@@ -267,6 +271,7 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
 
 
     for (key, values) in sorted_intermediate_data {
+        println!("{:?} {:?}", key, values);
         let value_iter = Box::new(values.into_iter());
         let reduced_value = reduce_func(key.clone(), value_iter, serialized_args.clone())?;
         output_data.push(KeyValue { key: key.clone(), value: reduced_value });

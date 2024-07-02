@@ -78,8 +78,11 @@ pub fn map_stage_two(kv: KeyValue, _aux: Bytes) -> MapOutput {
     let mut map_output = Vec::new();
 
     for line in content.lines() {
+        println!("{}", line);
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() != 3 {
+        println!("{:?}", parts);
+
+        if parts.len() != 4 {
             continue;
         }
 
@@ -102,12 +105,14 @@ pub fn map_stage_two(kv: KeyValue, _aux: Bytes) -> MapOutput {
 pub fn reduce_stage_two(_key: Bytes, values: Box<dyn Iterator<Item = Bytes> + '_>, _aux: Bytes) -> Result<Bytes> {
     let mut sum = 0.0;
 
+    let key = String::from_utf8_lossy(&_key).to_string();
+
     for value in values {
         let value_str = String::from_utf8(value.to_vec())?;
         let value: f64 = value_str.parse()?;
         sum += value;
     }
 
-    let result = format!("{} C", sum);
+    let result = format!("{key} {} C\n", sum);
     Ok(Bytes::from(result))
 }

@@ -346,7 +346,7 @@ impl Coordinator for CoordinatorService {
                     JobStatus::Shuffle => {
                         // If the JobStatus is in shuffle, then we need to read the temp filenames in S3 again
                         let mut input_file = job.file_status.lock().unwrap();
-
+                        
                         let new_status = FileStatus {
                             status: JobStatus::ReducePhase,
                             elapsed: now(),
@@ -356,7 +356,7 @@ impl Coordinator for CoordinatorService {
                             new_status.clone()
                         );                        
                         let filename = job.files.lock().unwrap().get(0).unwrap().to_string().clone();
-                        println!("{}", &filename);
+                        println!("Shuffle file path: {}", &filename);
 
                         let task = Task {
                             input: filename.clone(), 
@@ -475,8 +475,8 @@ impl Coordinator for CoordinatorService {
         let mut input_files: HashMap<String, FileStatus> = HashMap::new();
         let _ = list_input_files.clone().into_iter().for_each(|f| {input_files.insert(f, FileStatus { status: JobStatus::Pending, elapsed: 0 });});
         // Creates the output directory 
-        let _ = create_directory(&self.s3_client, "mrl-lite", &standalone_job.output).await;
-        println!("Output dir {} created", &standalone_job.output);
+        // let _ = create_directory(&self.s3_client, "mrl-lite", &standalone_job.output).await;
+        // println!("Output dir {} created", &standalone_job.output);
 
         // Generates the job id for the job
         // let job_id = calculate_hash(&standalone_job).to_string();

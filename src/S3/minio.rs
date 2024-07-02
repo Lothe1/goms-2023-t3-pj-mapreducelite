@@ -354,15 +354,21 @@ async fn remove_file(path: &str) -> std::io::Result<()> {
     fs::remove_file(path).await
 }
 pub async fn merge_files_under_prefix_and_cleanup(client: &Client, bucket: &str, prefix: &str, output_file: &str) -> Result<(), anyhow::Error> {
-    let mut input_files = Vec::new();
-    let resp = client.list_objects_v2().bucket(bucket).prefix(prefix).send().await?;
-    for object in resp.contents.unwrap_or_default() {
-        input_files.push(object.key.unwrap_or_default());
-    }
+
+    let temp_prefix = prefix.clone();
+    let mut prefix_chars = temp_prefix.chars();
+    prefix_chars.next();
+    let pref = prefix_chars.as_str();
+    let mut input_files =  list_files_with_prefix(&client, &bucket, &pref).await.unwrap();
+    // let resp = client.list_objects_v2().bucket(bucket).prefix(prefix).send().await?;
+    // for object in resp.contents.unwrap_or_default() {
+    //     input_files.push(object.key.unwrap_or_default());
+    // }
     let mut count = 0;
- 
+    println!("{:?}", input_files);
     for file in input_files {
-        download_file(client, bucket, file.as_str(), count.to_string().as_str());
+        println!("File downloaded: {}", file);
+        download_file(client, bucket, &format!("./{}", file), count.to_string().as_str());
         let count_str = count.clone().to_string();
 
         count += 1;
@@ -370,7 +376,7 @@ pub async fn merge_files_under_prefix_and_cleanup(client: &Client, bucket: &str,
     let strings: Vec<String> = (0..count).map(|x| x.to_string()).collect();
     let localfiles: Vec<&str> = strings.iter().map(AsRef::as_ref).collect();
     //Make parquet locally 
-    combine_parquets(localfiles.clone(), output_file);
+    combine_parquets(localfiles.clone(), &prefix, &output_file);
 
     //remove objects in s3 with prefix
     remove_object_with_prefix(client, bucket, prefix, prefix).await?;
