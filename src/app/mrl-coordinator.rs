@@ -474,13 +474,6 @@ impl Coordinator for CoordinatorService {
 
         let mut input_files: HashMap<String, FileStatus> = HashMap::new();
         let _ = list_input_files.clone().into_iter().for_each(|f| {input_files.insert(f, FileStatus { status: JobStatus::Pending, elapsed: 0 });});
-        // Creates the output directory 
-        // let _ = create_directory(&self.s3_client, "mrl-lite", &standalone_job.output).await;
-        // println!("Output dir {} created", &standalone_job.output);
-
-        // Generates the job id for the job
-        // let job_id = calculate_hash(&standalone_job).to_string();
-        // let _ = minio::create_directory(&self.s3_client, "mrl-lite", &format!("/temp/temp-{}", job_id)).await;
 
         let job_id = format!("{:?}", SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_nanos());
         println!("{job_id}");
@@ -491,7 +484,6 @@ impl Coordinator for CoordinatorService {
             id: job_id,
             status: JobStatus::Pending,
             job: standalone_job, 
-            // engine: wl,
             files: Arc::new(Mutex::new(list_input_files.clone())),
             file_status: Arc::new(Mutex::new(input_files)),
         };
