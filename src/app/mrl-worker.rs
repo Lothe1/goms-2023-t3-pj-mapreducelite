@@ -1,160 +1,33 @@
-// use anyhow::*;
-#![ allow(warnings)]
-use aws_smithy_types::base64::encode;
-use cmd::coordinator::now;
 use itertools::Itertools;
 use mrlite::*;
 use bytes::Bytes;
 use clap::Parser;
 use cmd::worker::Args;
-use prost::Name;
 use tokio::time::sleep;
-use tonic::{Request, Response};
-use tonic::{transport::Server, Status};
-use tonic::transport::Channel;
+use tonic::Request;
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write, BufRead};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
-// use std::io::{BufReader, Read};
-// use aws_sdk_s3::config::{Credentials, Config, Region, endpoint};
 use aws_sdk_s3::Client;
 use S3::minio;
 use standalone::Job;
 use dashmap::DashMap;
 use uuid::Uuid; 
+use std::fs;
 
 mod mapreduce {
     tonic::include_proto!("mapreduce");
 }
 
-use mapreduce::{JobRequest, Task, WorkerRegistration, WorkerReport, WorkerRequest, WorkerResponse, WorkerCountRequest, WorkerCountResponse};
+use mapreduce::{WorkerRegistration, WorkerReport, WorkerRequest, WorkerCountRequest};
 use mapreduce::coordinator_client::CoordinatorClient;
 use mrlite::Encode::encode_decode;
-use mrlite::Encode::encode_decode::{append_parquet, key_value_list_to_key_listand_value_list, make_writer};
+use mrlite::Encode::encode_decode::key_value_list_to_key_listand_value_list;
 use mrlite::S3::minio::upload_parts;
 
 async fn get_number_of_workers(coordinator_client: &mut CoordinatorClient<tonic::transport::Channel>) -> Result<i32, Box<dyn std::error::Error>> {
     let request = tonic::Request::new(WorkerCountRequest {});
     let response = coordinator_client.get_worker_count(request).await?;
     Ok(response.into_inner().count)
-}
-
-async fn map2(client: &Client, job: &Job, num_reduce_workers: u32) -> Result<String, anyhow::Error> {
-    let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
-    let bucket_name = "mrl-lite";
-    let object_name = &job.input;
-    println!("{:?}", object_name);
-
-    let content = minio::get_object(&client, bucket_name, object_name).await?;
-    let input_kv = KeyValue {
-        key: Bytes::from(object_name.clone()),
-        value: Bytes::from(content),
-    };
-    // println!("{:?}", input_kv.key);
-
-    let serialized_args = Bytes::from(job.args.join(" "));
-    let map_func = engine.map_fn;
-
-    let mut intermediate_data = HashMap::new();
-
-    for item in map_func(input_kv, serialized_args.clone())? {
-        let kv = item?;
-        let hashed_key = ihash(&kv.key.as_ref()) % num_reduce_workers;
-        let temp_path = format!(".{}/{}", job.output, hashed_key);
-
-        fs::create_dir_all(&temp_path)?;
-
-        let filename = now();
-        let file_path = format!("{}/{}", temp_path, filename);
-
-        let mut file = OpenOptions::new().write(true).create(true).open(&file_path)?;
-        let mut writer = make_writer(&mut file);
-
-        append_parquet(&file, &mut writer, vec![kv.key.clone()], vec![kv.value.clone()]);
-
-        writer.close().unwrap();
-
-        intermediate_data
-            .entry(hashed_key)
-            .or_insert_with(Vec::new)
-            .push(file_path);
-    }
-
-    // Upload files to S3
-    for (hashed_key, file_paths) in intermediate_data {
-        for file_path in file_paths {
-            let filename = file_path.split('/').last().unwrap_or("");
-            let s3_path = format!("{}/{}/{}", job.output, hashed_key, filename);
-            upload_parts(&client, bucket_name, &s3_path).await;
-            fs::remove_file(&file_path)?;
-        }
-    }
-
-    Ok(job.output.clone())
-}
-
-async fn reduce2(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
-    let engine: Workload = workload::try_named(&job.workload.clone()).expect("Error loading workload");
-    let bucket_name = "mrl-lite";
-    let object_name = &job.input;
-    println!("{:?}", object_name);
-
-    // Fetch intermediate data from MinIO
-    let content = minio::download_file(&client, bucket_name, object_name,"temp3123").await?;
-
-    // // delete the intermediate data in minio
-    // tokio::spawn(async move {
-    //     minio::delete_object(&client, bucket_name, object_name).await.unwrap();
-    // });
-    // minio::delete_object(&client, &bucket_name, &object_name).await.unwrap();
-
-    let (keys, values) = encode_decode::read_parquet("temp3123");
-    let keys_values: Vec<_> = keys.into_iter().zip(values.into_iter()).collect();
-    fs::remove_file("temp3123").expect("Failed to remove temp file");
-
-    // Intermediate data storage
-    let mut intermediate_data = HashMap::new();
-
-    for (key, value) in keys_values {
-        intermediate_data.entry(key).or_insert_with(Vec::new).push(value);
-    }
-
-    // Sort intermediate data by key
-    let mut sorted_intermediate_data: Vec<(Bytes, Vec<Bytes>)> = intermediate_data.into_iter().collect();
-    sorted_intermediate_data.sort_by(|a, b| a.0.cmp(&b.0));
-
-    // Reduce intermediate data
-    let mut output_data = Vec::new();
-    //Map reduce parse addition args
-    let serialized_args = Bytes::from(job.args.join(" "));
-    let reduce_func = engine.reduce_fn;
-
-
-    for (key, values) in sorted_intermediate_data {
-        let value_iter = Box::new(values.into_iter());
-        let reduced_value = reduce_func(key.clone(), value_iter, serialized_args.clone())?;
-        output_data.push(KeyValue { key: key.clone(), value: reduced_value });
-    }
-
-    // Prepare and upload the final output
-    let filename = now();
-    let mut content = String::new();
-
-    for kv in &output_data {
-        let key = utils::string_from_bytes(kv.key.clone());
-        let value = utils::string_from_bytes(kv.value.clone());
-        let formatted = format!("{:?}\t{:?}", key, value);
-        content.push_str(formatted.as_str());
-    }
-
-    match minio::upload_string(&client, bucket_name, &format!("{}{}", job.output, filename), &content).await {
-        Ok(_) => println!("Uploaded to {}{}", job.output, filename),
-        Err(e) => eprintln!("Failed to upload: {:?}", e),
-    }
-    
-    Ok(filename.to_string())
 }
 
 type BucketIndex = u32;
@@ -172,7 +45,7 @@ async fn map(
     let s3_bucket_name = "mrl-lite";
     let s3_object_name = &job.input;
     let content = minio::get_object(&client, s3_bucket_name, s3_object_name).await?;
-    let parsed_content: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+    let _: Vec<String> = content.lines().map(|s| s.to_string()).collect();
     let serialized_args = Bytes::from(job.args.join(" "));
     
     let filename = s3_object_name.clone();
@@ -202,7 +75,7 @@ async fn map(
     //Now under bucket subdirectory we upload the intermediate data from this worker
    
     for (bucket_no, key_values) in buckets.into_iter() {
-        println!("Bucket [{bucket_no}]");
+        // println!("Bucket [{bucket_no}]");
         let filename = Uuid::new_v4().to_string();
         let object_name = format!("{}{}/{}", &job.output,bucket_no, filename);
         let (keys, values): (Vec<Bytes>, Vec<Bytes>) = key_value_list_to_key_listand_value_list(key_values.clone());
@@ -238,12 +111,13 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     // Fetch intermediate data from MinIO
     let mut key_value_vec: Vec<(Bytes, Bytes)> = Vec::new();
     for file in &files_in_bucket {
-        let content = minio::download_file(&client, &bucket_name, &file,"temp3123").await?;
+        let temp_filename = Uuid::new_v4().to_string();
+        let _ = minio::download_file(&client, &bucket_name, &file,&temp_filename.clone()).await?;
 
-        let (keys, values) = encode_decode::read_parquet("temp3123");
+        let (keys, values) = encode_decode::read_parquet(&temp_filename.clone());
 
         let mut keys_values: Vec<(Bytes, Bytes)> = keys.into_iter().zip(values.into_iter()).collect();
-        fs::remove_file("temp3123").expect("Failed to remove temp file");
+        fs::remove_file(temp_filename.clone()).expect("Failed to remove temp file");
         key_value_vec.append(&mut keys_values);
     }
 
@@ -272,12 +146,12 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     }
 
     // Prepare and upload the final output
-    let filename = now();
+    let filename = Uuid::new_v4().to_string();
     let mut content = String::new();
     let output_file = format!("{}{}", job.output, filename);
 
     for kv in &output_data {
-        let key = utils::string_from_bytes(kv.key.clone());
+        let _ = utils::string_from_bytes(kv.key.clone());
         let value = utils::string_from_bytes(kv.value.clone());
         let formatted = format!("{}", value.unwrap());
         content.push_str(formatted.as_str());
@@ -286,10 +160,6 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     match minio::upload_string(&client, bucket_name, &output_file, &content).await {
         Ok(_) => println!("Uploaded to {}",output_file),
         Err(e) => eprintln!("Failed to upload: {:?}", e),
-    }
-    // Delete intermediate files
-    for file in &files_in_bucket {
-        minio::delete_object(&client, &bucket_name, &file).await.unwrap();
     }
     Ok(filename.to_string())
 }
@@ -317,7 +187,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let s3_ip = format!("http://{}", s3_args.args.get("ip").unwrap().clone());
     let s3_user = s3_args.args.get("user").unwrap().clone();
     let s3_pw = s3_args.args.get("pw").unwrap().clone();
-    println!("s3: {} {} {}\n", s3_ip, s3_user, s3_pw);
+    // println!("s3: {} {} {}\n", s3_ip, s3_user, s3_pw);
 
     // Initialize S3 client
     let s3_client = minio::get_min_io_client(s3_ip.clone(), s3_user.clone(), s3_pw.clone()).await?;  

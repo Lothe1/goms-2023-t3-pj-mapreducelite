@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use aws_config::timeout;
 use aws_sdk_s3::Client;
 // use anyhow::*;
 // use bytes::Bytes;
@@ -34,8 +35,7 @@ enum JobStatus {
     MapPhase,
     Shuffle,
     ReducePhase,
-    Completed,
-    Failed
+    Completed
 } 
 
 #[derive(Debug, Clone)]
@@ -86,7 +86,7 @@ struct WorkerNode {
 
 // Creates a new Coordinator Service with the supplied arguments
 impl CoordinatorService {
-    fn new(ip: impl ToString, user: impl ToString, pw: impl ToString, client: Client) -> Self {
+    fn new(ip: impl ToString, user: impl ToString, pw: impl ToString, client: Client, timeout: u64) -> Self {
         Self {
             job_queue: Arc::new(Mutex::new(VecDeque::new())),
             completed_jobs: Arc::new(Mutex::new(VecDeque::new())),
@@ -95,6 +95,7 @@ impl CoordinatorService {
             os_user: user.to_string(),
             os_pw: pw.to_string(),
             s3_client: client,
+            timeout: Duration::from_secs(timeout).as_nanos(),
         }
     }
 }
@@ -107,7 +108,8 @@ pub struct CoordinatorService {
     os_ip: String,
     os_user: String,
     os_pw: String,
-    s3_client: Client
+    s3_client: Client,
+    timeout: u128,
 }
 
 fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>) -> Option<String> {
@@ -137,9 +139,6 @@ fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>)
                 }
             }
             JobStatus::Completed => {
-                return None;
-            }
-            JobStatus::Failed => {
                 return None;
             }
         }
@@ -294,7 +293,7 @@ impl Coordinator for CoordinatorService {
 
                         // We want to pull the input files here (we assume that there have been no submitted files earlier)
                         let list_input_files = list_files_with_prefix(&self.s3_client, "mrl-lite", &job.job.input).await.unwrap();
-                        println!("Num files in input: {}", list_input_files.len());
+                        // println!("Num files in input: {}", list_input_files.len());
                 
                         let mut input_files: HashMap<String, FileStatus> = HashMap::new();
                         let _ = list_input_files.clone().into_iter().for_each(|f| {input_files.insert(f, FileStatus { status: JobStatus::Pending, elapsed: 0 });});
@@ -303,18 +302,18 @@ impl Coordinator for CoordinatorService {
                         // println!("Input files: {:?}", list_input_files);
                         // If no input files => mark the job as completed
                         if list_input_files.len() == 0 {
-                            println!("No files");
+                            // println!("No files");
                             job_q.pop_front();
                             let modified_job = Job {
                                 id: job.id.clone(),
-                                status: JobStatus::Failed,
+                                status: JobStatus::Completed,
                                 job: job.job.clone(),
                                 files: Arc::new(Mutex::new(list_input_files.clone())),
                                 file_status: Arc::new(Mutex::new(input_files.clone())),
                             };
                             let mut completed_jobs = self.completed_jobs.lock().unwrap();
                             completed_jobs.push_back(modified_job);
-                            return Err(Status::cancelled("Job failed!"))
+                            return Err(Status::not_found("No files in input!"))
                         }
 
                         // let new_input_files = list_files_with_prefix(&self.s3_client, &format!("mrl-lite"), &job.job.input).await.unwrap();
@@ -423,7 +422,8 @@ impl Coordinator for CoordinatorService {
                         };
 
                         job_q.pop_front();
-                        job_q.push_front(modified_job);                        println!("Gave a pending task for reducing");
+                        job_q.push_front(modified_job);                        
+                        // println!("Gave a pending task for reducing");
                         let mut workers = self.workers.lock().unwrap();
                         workers.insert(worker_addr, WorkerNode { state: WorkerState::Busy, addr: worker_addr.clone(), elapsed: now() });
                         return Ok(Response::new(task))
@@ -467,7 +467,7 @@ impl Coordinator for CoordinatorService {
                         };
                         job_q.pop_front();
                         job_q.push_front(modified_job);
-                        println!("Gave a reducing task");
+                        // println!("Gave a reducing task");
                         let mut workers = self.workers.lock().unwrap();
                         workers.insert(worker_addr, WorkerNode { state: WorkerState::Busy, addr: worker_addr.clone(), elapsed: now() });
                         return Ok(Response::new(task))
@@ -480,20 +480,15 @@ impl Coordinator for CoordinatorService {
                         let client = self.s3_client.clone();
                         let prefix = format!("temp/{}/", job.id.clone());
                         completed_jobs.push_back(job);
-                        println!("Job completed!");
+                        // println!("Job completed!");
                         tokio::spawn(async move {
-                            println!("{:?}", &format!("{}", prefix));
                             remove_object_with_prefix(&client, &format!("mrl-lite"), &format!("{}", prefix),  &format!("{}", prefix)).await.unwrap();
                             remove_object(&client, &format!("mrl-lite"), &format!("{}", prefix)).await.unwrap();
                         });                        
-                        // delete_object(&self.s3_client, &format!("mrl-lite"), &format!("/temp/{}/", job.id)).await.unwrap();
 
                         let mut workers = self.workers.lock().unwrap();
                         workers.insert(worker_addr, WorkerNode { state: WorkerState::Idle, addr: worker_addr.clone(), elapsed: now() });
                         return Err(Status::not_found("Job completed!"))
-                    }
-                    JobStatus::Failed => {
-                        return Err(Status::cancelled("Job failed!"))
                     }
                 }
             },
@@ -519,31 +514,24 @@ impl Coordinator for CoordinatorService {
             }
         };
 
+        let mut input_dir = request.get_ref().input.clone();
+        if input_dir.ends_with('/') {
+            input_dir.pop();
+        }
+
+        let mut output_dir = request.get_ref().output.clone();
+        if output_dir.ends_with('/') {
+            output_dir.pop();
+        }
+
         let standalone_job = standalone::Job {
-            input: request.get_ref().input.clone(),
+            input: input_dir.clone(),
             workload: request.get_ref().workload.clone(),
-            output: request.get_ref().output.clone(),
+            output: output_dir.clone(),
             args: request.get_ref().args.clone().split_whitespace().map(String::from).collect() // Change this to a vector of strings
         };
         
-        // let list_input_files = list_files_with_prefix(&self.s3_client, "mrl-lite", &standalone_job.input).await.unwrap();
-        // println!("Num files submitted: {}", list_input_files.len());
-
-        // let mut input_files: HashMap<String, FileStatus> = HashMap::new();
-        // let _ = list_input_files.clone().into_iter().for_each(|f| {input_files.insert(f, FileStatus { status: JobStatus::Pending, elapsed: 0 });});
-
-        let job_id = format!("{:?}", SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_nanos());
-        println!("{job_id}");
-
-        // println!("{:?}", input_files);
-
-        // let job = Job {
-        //     id: job_id,
-        //     status: JobStatus::Pending,
-        //     job: standalone_job, 
-        //     files: Arc::new(Mutex::new(list_input_files.clone())),
-        //     file_status: Arc::new(Mutex::new(input_files)),
-        // };
+        let job_id = format!("{:?}", now());
 
         let job = Job {
             id: job_id,
@@ -579,7 +567,7 @@ impl Coordinator for CoordinatorService {
             s if s == format!("complete") => {
                 let completed_jobs = self.completed_jobs.lock().unwrap();
 
-                println!("{}", format!("--------------\n{:?}\n-------------", completed_jobs));
+                // println!("{}", format!("--------------\n{:?}\n-------------", completed_jobs));
     
                 let tasks: Vec<Task> = completed_jobs.iter().map(|job| job_to_task(job.clone())).collect();
                 tasks
@@ -587,12 +575,12 @@ impl Coordinator for CoordinatorService {
             s if s == format!("all") => {
                 let completed_jobs = self.completed_jobs.lock().unwrap();
 
-                println!("{}", format!("--------------\n{:?}\n-------------", completed_jobs));
+                // println!("{}", format!("--------------\n{:?}\n-------------", completed_jobs));
     
                 let mut completed_tasks: Vec<Task> = completed_jobs.iter().map(|job| job_to_task(job.clone())).collect();
                 let jobs = self.job_queue.lock().unwrap();
 
-                println!("{}", format!("--------------\n{:?}\n-------------", jobs));
+                // println!("{}", format!("--------------\n{:?}\n-------------", jobs));
     
                 let mut tasks: Vec<Task> = jobs.iter().map(|job| job_to_task(job.clone())).collect();
                 completed_tasks.append(&mut tasks);
@@ -602,7 +590,7 @@ impl Coordinator for CoordinatorService {
 
                 let jobs = self.job_queue.lock().unwrap();
 
-                println!("{}", format!("--------------\n{:?}\n-------------", jobs));
+                // println!("{}", format!("--------------\n{:?}\n-------------", jobs));
     
                 let tasks: Vec<Task> = jobs.iter().map(|job| job_to_task(job.clone())).collect();
                 tasks
@@ -677,7 +665,6 @@ impl Coordinator for CoordinatorService {
                 let next_job_state = check_all_file_states(&file_names, &file_status).unwrap();
 
                 if job.status.ne(&next_job_state) {
-                    // println!("Changing job state to: {:?}", &next_job_state);
                     let modified_job = Job {
                         id: job.id.clone(),
                         status: next_job_state,
@@ -687,7 +674,6 @@ impl Coordinator for CoordinatorService {
                     };
                     job_q.push_front(modified_job);
                 } else {
-                    // println!("Job is still {:?}", &job.status);
                     let modified_job = Job {
                         id: job.id.clone(),
                         status: job.status.clone(),
@@ -709,19 +695,20 @@ impl Coordinator for CoordinatorService {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    print!("Hello coordinator!\n");
+    println!("Hello coordinator!");
     let args = Args::parse();
     let port: u128 = args.port.unwrap_or(50051);
     let os_ip: String = args.os.unwrap_or_else(|| "127.0.0.1:9000".into());
     let os_user: String = args.user.unwrap_or_else(|| "ROOTNAME".into());
     let os_pw: String = args.pw.unwrap_or_else(|| "CHANGEME123".into());
+    let timeout: u64 = args.timeout.unwrap_or_else(|| 15);
     // Port to listen to
     let addr = format!("0.0.0.0:{port}").parse().unwrap();
 
     // If having trouble connecting to minio vvvvvvvvv
     // let s3_client = get_local_minio_client().await; 
     let s3_client = get_min_io_client(format!("http://{}",os_ip.clone()), os_user.clone(), os_pw.clone()).await.unwrap();
-    let coordinator = CoordinatorService::new(os_ip.clone(), os_user.clone(), os_pw.clone(), s3_client.clone());
+    let coordinator = CoordinatorService::new(os_ip.clone(), os_user.clone(), os_pw.clone(), s3_client.clone(), timeout);
 
     println!("Coordinator listening on {}", addr);
     // Create a bucket for the coordinator, and the subdirectores if not exist
