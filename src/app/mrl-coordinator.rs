@@ -115,24 +115,24 @@ fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>)
         let this_file_status = file_status.get(file).unwrap();
         match this_file_status.status {
             JobStatus::Pending => {
-                println!("Pending task");
+                // println!("Pending task");
                 return Some(file.clone());
             }
             JobStatus::MapPhase => {
                 let elapsed = now() - this_file_status.elapsed;
                 if (elapsed) > STRAGGLE_LIMIT {
-                    println!("Straggling task");
+                    // println!("Straggling task");
                     return Some(file.clone());
                 }
             }
             JobStatus::Shuffle => {
-                println!("Pending task");
+                // println!("Pending task");
                 return Some(file.clone());
             }
             JobStatus::ReducePhase => {
                 let elapsed = now() - this_file_status.elapsed;
                 if (elapsed) > STRAGGLE_LIMIT {
-                    println!("Straggling task");
+                    // println!("Straggling task");
                     return Some(file.clone());
                 }
             }
@@ -144,7 +144,7 @@ fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>)
             }
         }
     }
-    println!("No task!");
+    // println!("No task!");
     return None;
 }
 
@@ -300,10 +300,10 @@ impl Coordinator for CoordinatorService {
                         let _ = list_input_files.clone().into_iter().for_each(|f| {input_files.insert(f, FileStatus { status: JobStatus::Pending, elapsed: 0 });});
                         let mut job_q = self.job_queue.lock().unwrap_or_else(|e| e.into_inner());
 
-                        println!("Input files: {:?}", list_input_files);
+                        // println!("Input files: {:?}", list_input_files);
                         // If no input files => mark the job as completed
                         if list_input_files.len() == 0 {
-                            let mut job_q = self.job_queue.lock().unwrap_or_else(|e| e.into_inner());
+                            println!("No files");
                             job_q.pop_front();
                             let modified_job = Job {
                                 id: job.id.clone(),
@@ -344,7 +344,7 @@ impl Coordinator for CoordinatorService {
                         };
                         job_q.pop_front();
                         job_q.push_front(modified_job);
-                        println!("Gave a pending task for mapping");
+                        // println!("Gave a pending task for mapping");
                         let mut workers = self.workers.lock().unwrap();
                         workers.insert(worker_addr, WorkerNode { state: WorkerState::Busy, addr: worker_addr.clone(), elapsed: now() });
                         return Ok(Response::new(task))
@@ -386,7 +386,7 @@ impl Coordinator for CoordinatorService {
                         };
                         job_q.pop_front();
                         job_q.push_front(modified_job);
-                        println!("Gave a pending task or lagging task");
+                        // println!("Gave a pending task or lagging task");
                         let mut workers = self.workers.lock().unwrap();
                         workers.insert(worker_addr, WorkerNode { state: WorkerState::Busy, addr: worker_addr.clone(), elapsed: now() });
                         return Ok(Response::new(task))
@@ -405,7 +405,7 @@ impl Coordinator for CoordinatorService {
                             new_status.clone()
                         );                        
                         let filename = job.files.lock().unwrap().get(0).unwrap().to_string().clone();
-                        println!("Shuffle file path: {}", &filename);
+                        // println!("Shuffle file path: {}", &filename);
 
                         let task = Task {
                             input: filename.clone(), 
@@ -650,7 +650,7 @@ impl Coordinator for CoordinatorService {
     async fn report_task(&self, request: Request<WorkerReport>) -> Result<Response<WorkerResponse>, Status> {
         let completed_file = request.get_ref().input.clone();
         let out_paths = request.get_ref().output.clone();
-        println!("Worker reporting completion for file {}, with {:?}", completed_file, out_paths);
+        // println!("Worker reporting completion for file {}, with {:?}", completed_file, out_paths);
         let mut job_q = self.job_queue.lock().unwrap();
         // If the file status is currently in MapPhase -> change file state to Shuffle
         // If the file status is currently in ReducePhase -> change file state to Completed
@@ -677,7 +677,7 @@ impl Coordinator for CoordinatorService {
                 let next_job_state = check_all_file_states(&file_names, &file_status).unwrap();
 
                 if job.status.ne(&next_job_state) {
-                    println!("Changing job state to: {:?}", &next_job_state);
+                    // println!("Changing job state to: {:?}", &next_job_state);
                     let modified_job = Job {
                         id: job.id.clone(),
                         status: next_job_state,
@@ -687,7 +687,7 @@ impl Coordinator for CoordinatorService {
                     };
                     job_q.push_front(modified_job);
                 } else {
-                    println!("Job is still {:?}", &job.status);
+                    // println!("Job is still {:?}", &job.status);
                     let modified_job = Job {
                         id: job.id.clone(),
                         status: job.status.clone(),

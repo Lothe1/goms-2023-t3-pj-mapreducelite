@@ -202,12 +202,10 @@ async fn map(
     //Now under bucket subdirectory we upload the intermediate data from this worker
    
     for (bucket_no, key_values) in buckets.into_iter() {
-        println!("Bucket [{bucket_no}] : {:?}", key_values);
+        println!("Bucket [{bucket_no}]");
         let filename = Uuid::new_v4().to_string();
         let object_name = format!("{}{}/{}", &job.output,bucket_no, filename);
-        println!("{}", &object_name);
         let (keys, values): (Vec<Bytes>, Vec<Bytes>) = key_value_list_to_key_listand_value_list(key_values.clone());
-        println!("{:?}\n{:?}", keys, values);
         //cheese method cuz has to be the same name
         encode_decode::write_parquet(&format!(".{}", object_name), keys, values);
         upload_parts(&client, s3_bucket_name, &object_name).await.unwrap();
@@ -231,7 +229,6 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let mut input = job_input.chars();
     input.next();
     let object_name = input.as_str();
-    println!("{:?}", object_name);
 
     let files_in_bucket = minio::list_files_with_prefix(&client, &bucket_name, &object_name).await.unwrap();
     println!("{:?}", files_in_bucket);
@@ -246,7 +243,6 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
         let (keys, values) = encode_decode::read_parquet("temp3123");
 
         let mut keys_values: Vec<(Bytes, Bytes)> = keys.into_iter().zip(values.into_iter()).collect();
-        println!("{:?}", keys_values);
         fs::remove_file("temp3123").expect("Failed to remove temp file");
         key_value_vec.append(&mut keys_values);
     }
@@ -255,7 +251,6 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let mut intermediate_data = HashMap::new();
 
     for (key, value) in key_value_vec {
-        println!("{} {}", String::from_utf8_lossy(&key), String::from_utf8_lossy(&value));
         intermediate_data.entry(key).or_insert_with(Vec::new).push(value);
     }
 
@@ -271,7 +266,6 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
 
 
     for (key, values) in sorted_intermediate_data {
-        println!("{:?} {:?}", key, values);
         let value_iter = Box::new(values.into_iter());
         let reduced_value = reduce_func(key.clone(), value_iter, serialized_args.clone())?;
         output_data.push(KeyValue { key: key.clone(), value: reduced_value });
