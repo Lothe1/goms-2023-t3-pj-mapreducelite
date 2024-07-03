@@ -19,6 +19,9 @@ pub struct Args {
     /// Login Password of the Object Store
     #[clap(short, long, default_value = None, short = 'p')]
     pub pw: Option<String>,
+    /// Timeout period for worker to become a straggler (default 15s)
+    #[clap(short, long, default_value = None, short = 't')]
+    pub timeout: Option<u64>,
 }
 
 pub fn now() -> u128 {
