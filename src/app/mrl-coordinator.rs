@@ -1,7 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use aws_config::timeout;
+use std::time::Duration;
 use aws_sdk_s3::Client;
 // use anyhow::*;
 // use bytes::Bytes;
@@ -24,8 +23,6 @@ use mrlite::S3::minio::*;
 /* 
     Only one coordinator !!
 */
-
-const STRAGGLE_LIMIT: u128 = Duration::from_secs(15).as_nanos();
 
 // Only one job should be in either of the following states: `{MapPhase, Shuffle, ShufflePhase}``; 
 // all other jobs should either be `Pending` or `Completed`.
@@ -112,7 +109,7 @@ pub struct CoordinatorService {
     timeout: u128,
 }
 
-fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>) -> Option<String> {
+fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>, timeout: u128) -> Option<String> {
     for file in files {
         let this_file_status = file_status.get(file).unwrap();
         match this_file_status.status {
@@ -122,7 +119,7 @@ fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>)
             }
             JobStatus::MapPhase => {
                 let elapsed = now() - this_file_status.elapsed;
-                if (elapsed) > STRAGGLE_LIMIT {
+                if (elapsed) > timeout {
                     // println!("Straggling task");
                     return Some(file.clone());
                 }
@@ -133,7 +130,7 @@ fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>)
             }
             JobStatus::ReducePhase => {
                 let elapsed = now() - this_file_status.elapsed;
-                if (elapsed) > STRAGGLE_LIMIT {
+                if (elapsed) > timeout {
                     // println!("Straggling task");
                     return Some(file.clone());
                 }
@@ -204,9 +201,6 @@ fn check_all_file_states(files: &Vec<String>, file_status: &HashMap<String, File
                     }
                     JobStatus::Completed => {
                         status_counter.complete += 1;
-                    }
-                    _ => {
-
                     }
                 }
             }
@@ -353,7 +347,7 @@ impl Coordinator for CoordinatorService {
                         let mut input_file = job.file_status.lock().unwrap();
                         let file_names = job.files.lock().unwrap();
                         // let opt_file = get_next_file(&job.files, &input_file);
-                        let file = match get_next_file(&file_names, &input_file) {
+                        let file = match get_next_file(&file_names, &input_file, self.timeout) {
                             Some(f) => f,
                             None => { 
                                 // let modified_job = job.clone();
@@ -432,7 +426,7 @@ impl Coordinator for CoordinatorService {
                         let mut job_q = self.job_queue.lock().unwrap_or_else(|e| e.into_inner());
 
                         let mut input_file = job.file_status.lock().unwrap();
-                        let file = match get_next_file(&job.files.lock().unwrap(), &input_file) {
+                        let file = match get_next_file(&job.files.lock().unwrap(), &input_file, self.timeout) {
                             Some(f) => f,
                             None => { 
                                 // let modified_job = job.clone();
@@ -603,7 +597,7 @@ impl Coordinator for CoordinatorService {
     async fn system_status(&self, _request: Request<Empty>) -> Result<Response<SystemStatus>, Status> {
         let workers = self.workers.lock().unwrap();
         let worker_list: Vec<Worker> = workers.iter().map(|(worker_addr, worker)| {
-            let state = if (now() - worker.elapsed) > STRAGGLE_LIMIT {
+            let state = if (now() - worker.elapsed) > self.timeout {
                 WorkerState::Dead
             } else {
                 worker.state.clone()
