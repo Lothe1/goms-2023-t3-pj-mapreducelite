@@ -82,10 +82,10 @@ async fn map(
         //cheese method cuz has to be the same name
         encode_decode::write_parquet(&format!(".{}", object_name), keys, values);
         upload_parts(&client, s3_bucket_name, &object_name).await.unwrap();
+        fs::remove_file(format!(".{}{}/{}", &job.output,bucket_no, filename))?;
     }
 
     //clean local files
-    fs::remove_dir_all("./temp")?;
 
     //you can merge files with this
     // merge_files_under_prefix_and_cleanup(client: &Client, bucket: &str, prefix: &str, output_file: &str)

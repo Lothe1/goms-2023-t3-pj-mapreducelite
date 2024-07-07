@@ -114,24 +114,20 @@ fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>,
         let this_file_status = file_status.get(file).unwrap();
         match this_file_status.status {
             JobStatus::Pending => {
-                // println!("Pending task");
                 return Some(file.clone());
             }
             JobStatus::MapPhase => {
                 let elapsed = now() - this_file_status.elapsed;
                 if (elapsed) > timeout {
-                    // println!("Straggling task");
                     return Some(file.clone());
                 }
             }
             JobStatus::Shuffle => {
-                // println!("Pending task");
                 return Some(file.clone());
             }
             JobStatus::ReducePhase => {
                 let elapsed = now() - this_file_status.elapsed;
                 if (elapsed) > timeout {
-                    // println!("Straggling task");
                     return Some(file.clone());
                 }
             }
@@ -140,7 +136,6 @@ fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>,
             }
         }
     }
-    // println!("No task!");
     return None;
 }
 
@@ -287,16 +282,13 @@ impl Coordinator for CoordinatorService {
 
                         // We want to pull the input files here (we assume that there have been no submitted files earlier)
                         let list_input_files = list_files_with_prefix(&self.s3_client, "mrl-lite", &job.job.input).await.unwrap();
-                        // println!("Num files in input: {}", list_input_files.len());
                 
                         let mut input_files: HashMap<String, FileStatus> = HashMap::new();
                         let _ = list_input_files.clone().into_iter().for_each(|f| {input_files.insert(f, FileStatus { status: JobStatus::Pending, elapsed: 0 });});
                         let mut job_q = self.job_queue.lock().unwrap_or_else(|e| e.into_inner());
 
-                        // println!("Input files: {:?}", list_input_files);
                         // If no input files => mark the job as completed
                         if list_input_files.len() == 0 {
-                            // println!("No files");
                             job_q.pop_front();
                             let modified_job = Job {
                                 id: job.id.clone(),
@@ -337,7 +329,6 @@ impl Coordinator for CoordinatorService {
                         };
                         job_q.pop_front();
                         job_q.push_front(modified_job);
-                        // println!("Gave a pending task for mapping");
                         let mut workers = self.workers.lock().unwrap();
                         workers.insert(worker_addr, WorkerNode { state: WorkerState::Busy, addr: worker_addr.clone(), elapsed: now() });
                         return Ok(Response::new(task))
@@ -379,7 +370,6 @@ impl Coordinator for CoordinatorService {
                         };
                         job_q.pop_front();
                         job_q.push_front(modified_job);
-                        // println!("Gave a pending task or lagging task");
                         let mut workers = self.workers.lock().unwrap();
                         workers.insert(worker_addr, WorkerNode { state: WorkerState::Busy, addr: worker_addr.clone(), elapsed: now() });
                         return Ok(Response::new(task))
@@ -398,7 +388,6 @@ impl Coordinator for CoordinatorService {
                             new_status.clone()
                         );                        
                         let filename = job.files.lock().unwrap().get(0).unwrap().to_string().clone();
-                        // println!("Shuffle file path: {}", &filename);
 
                         let task = Task {
                             input: filename.clone(), 
@@ -417,7 +406,6 @@ impl Coordinator for CoordinatorService {
 
                         job_q.pop_front();
                         job_q.push_front(modified_job);                        
-                        // println!("Gave a pending task for reducing");
                         let mut workers = self.workers.lock().unwrap();
                         workers.insert(worker_addr, WorkerNode { state: WorkerState::Busy, addr: worker_addr.clone(), elapsed: now() });
                         return Ok(Response::new(task))
@@ -461,7 +449,6 @@ impl Coordinator for CoordinatorService {
                         };
                         job_q.pop_front();
                         job_q.push_front(modified_job);
-                        // println!("Gave a reducing task");
                         let mut workers = self.workers.lock().unwrap();
                         workers.insert(worker_addr, WorkerNode { state: WorkerState::Busy, addr: worker_addr.clone(), elapsed: now() });
                         return Ok(Response::new(task))
@@ -474,7 +461,6 @@ impl Coordinator for CoordinatorService {
                         let client = self.s3_client.clone();
                         let prefix = format!("temp/{}/", job.id.clone());
                         completed_jobs.push_back(job);
-                        // println!("Job completed!");
                         tokio::spawn(async move {
                             remove_object_with_prefix(&client, &format!("mrl-lite"), &format!("{}", prefix),  &format!("{}", prefix)).await.unwrap();
                             remove_object(&client, &format!("mrl-lite"), &format!("{}", prefix)).await.unwrap();
@@ -560,21 +546,15 @@ impl Coordinator for CoordinatorService {
         let tasks = match show {
             s if s == format!("complete") => {
                 let completed_jobs = self.completed_jobs.lock().unwrap();
-
-                // println!("{}", format!("--------------\n{:?}\n-------------", completed_jobs));
     
                 let tasks: Vec<Task> = completed_jobs.iter().map(|job| job_to_task(job.clone())).collect();
                 tasks
             }
             s if s == format!("all") => {
                 let completed_jobs = self.completed_jobs.lock().unwrap();
-
-                // println!("{}", format!("--------------\n{:?}\n-------------", completed_jobs));
     
                 let mut completed_tasks: Vec<Task> = completed_jobs.iter().map(|job| job_to_task(job.clone())).collect();
                 let jobs = self.job_queue.lock().unwrap();
-
-                // println!("{}", format!("--------------\n{:?}\n-------------", jobs));
     
                 let mut tasks: Vec<Task> = jobs.iter().map(|job| job_to_task(job.clone())).collect();
                 completed_tasks.append(&mut tasks);
@@ -583,8 +563,6 @@ impl Coordinator for CoordinatorService {
             _ => {
 
                 let jobs = self.job_queue.lock().unwrap();
-
-                // println!("{}", format!("--------------\n{:?}\n-------------", jobs));
     
                 let tasks: Vec<Task> = jobs.iter().map(|job| job_to_task(job.clone())).collect();
                 tasks
@@ -632,7 +610,6 @@ impl Coordinator for CoordinatorService {
     async fn report_task(&self, request: Request<WorkerReport>) -> Result<Response<WorkerResponse>, Status> {
         let completed_file = request.get_ref().input.clone();
         let out_paths = request.get_ref().output.clone();
-        // println!("Worker reporting completion for file {}, with {:?}", completed_file, out_paths);
         let mut job_q = self.job_queue.lock().unwrap();
         // If the file status is currently in MapPhase -> change file state to Shuffle
         // If the file status is currently in ReducePhase -> change file state to Completed

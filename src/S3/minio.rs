@@ -198,7 +198,7 @@ pub async fn upload_parts(client: &Client, bucket: &str, filename: &str)-> Resul
         .await
         .unwrap();
 
-    println!("Created multipart upload with ID: {}", multipart_upload_res.upload_id.as_ref().unwrap());
+    // println!("Created multipart upload with ID: {}", multipart_upload_res.upload_id.as_ref().unwrap());
 
 
     let upload_id = multipart_upload_res.upload_id.unwrap();
@@ -326,7 +326,7 @@ pub async fn remove_object(client: &Client, bucket: &str, key: &str) -> Result<(
         .send()
         .await?;
 
-    println!("Object deleted.");
+    // println!("Object deleted.");
 
     Ok(())
 }
@@ -337,10 +337,10 @@ pub async fn remove_object_with_prefix(client: &Client, bucket: &str, key: &str,
     let resp = client.list_objects_v2().bucket(bucket).prefix(prefix).send().await?;
     for object in resp.contents.unwrap_or_default() {
         let key = object.key.unwrap_or_default();
-        println!("{:?}", key.clone());
+        // println!("{:?}", key.clone());
         objects.push(key);
     }
-    println!("{:?}", objects);
+    // println!("{:?}", objects);
     for object in objects {
         remove_object(client, bucket, &object).await?;
     }
@@ -365,9 +365,9 @@ pub async fn merge_files_under_prefix_and_cleanup(client: &Client, bucket: &str,
     //     input_files.push(object.key.unwrap_or_default());
     // }
     let mut count = 0;
-    println!("{:?}", input_files);
+    // println!("{:?}", input_files);
     for file in input_files {
-        println!("File downloaded: {}", file);
+        // println!("File downloaded: {}", file);
         download_file(client, bucket, &format!("./{}", file), count.to_string().as_str());
         let count_str = count.clone().to_string();
 
