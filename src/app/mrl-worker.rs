@@ -43,7 +43,9 @@ async fn map(
 
     let engine = workload::try_named(&job.workload.clone()).expect("Error loading workload");
     let s3_bucket_name = "mrl-lite";
-    let s3_object_name = &job.input;
+    let s3_object_name = &job.input.clone();
+    let (_, exact_name) = s3_object_name.rsplit_once('/').unwrap();
+    println!("{exact_name}");
     let content = minio::get_object(&client, s3_bucket_name, s3_object_name).await?;
     let _: Vec<String> = content.lines().map(|s| s.to_string()).collect();
     let serialized_args = Bytes::from(job.args.join(" "));
@@ -76,7 +78,7 @@ async fn map(
    
     for (bucket_no, key_values) in buckets.into_iter() {
         // println!("Bucket [{bucket_no}]");
-        let filename = Uuid::new_v4().to_string();
+        let filename = exact_name;
         let object_name = format!("{}{}/{}", &job.output,bucket_no, filename);
         let (keys, values): (Vec<Bytes>, Vec<Bytes>) = key_value_list_to_key_listand_value_list(key_values.clone());
         //cheese method cuz has to be the same name

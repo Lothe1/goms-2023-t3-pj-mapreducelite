@@ -119,7 +119,7 @@ fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>,
             JobStatus::MapPhase => {
                 let elapsed = now() - this_file_status.elapsed;
                 if (elapsed) > timeout {
-                    println!("Gave a straggling task");
+                    println!("Gave a straggling task -- {}", file);
                     return Some(file.clone());
                 }
             }
@@ -129,7 +129,7 @@ fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>,
             JobStatus::ReducePhase => {
                 let elapsed = now() - this_file_status.elapsed;
                 if (elapsed) > timeout {
-                    println!("Gave a straggling task");
+                    println!("Gave a straggling task -- {}", file);
                     return Some(file.clone());
                 }
             }
@@ -149,7 +149,11 @@ fn next_state(file: &String, file_status: &HashMap<String, FileStatus>) -> Optio
                 Some(JobStatus::Shuffle)
             } else if f_s.status.eq(&JobStatus::ReducePhase) {
                 Some(JobStatus::Completed)
-            }
+            // } else if f_s.status.eq(&JobStatus::Shuffle) {
+            //     Some(JobStatus::Shuffle)
+            // } else if f_s.status.eq(&JobStatus::Completed) {
+            //     Some(JobStatus::Completed)
+            } 
             else {
                 None
             }
@@ -621,6 +625,12 @@ impl Coordinator for CoordinatorService {
                 let mut file_names = in_files.clone();
                 let mut file_status = job.file_status.lock().unwrap();
                 let next_file_state = next_state(&completed_file, &file_status);
+                println!("{completed_file} {:?}", next_file_state);
+                if next_file_state.is_none() {
+                    let modified_job = job.clone();
+                    job_q.push_front(modified_job);
+                    return Err(Status::already_exists("Job already submitted"))
+                }
                 let next_state = next_file_state.unwrap();
                 let new_status = FileStatus {
                     status: next_state.clone(),
