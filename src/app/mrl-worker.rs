@@ -104,6 +104,8 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     let mut input = job_input.chars();
     input.next();
     let object_name = input.as_str();
+    let (_, exact_name) = object_name.rsplit_once('/').unwrap();
+    println!("{exact_name}");
 
     let files_in_bucket = minio::list_files_with_prefix(&client, &bucket_name, &object_name).await.unwrap();
     println!("{:?}", files_in_bucket);
@@ -148,7 +150,7 @@ async fn reduce(client: &Client, job: &Job) -> Result<String, anyhow::Error> {
     }
 
     // Prepare and upload the final output
-    let filename = Uuid::new_v4().to_string();
+    let filename = format!("mr-out-{exact_name}");
     let mut content = String::new();
     let output_file = format!("{}{}", job.output, filename);
 

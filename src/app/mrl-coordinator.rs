@@ -625,7 +625,6 @@ impl Coordinator for CoordinatorService {
                 let mut file_names = in_files.clone();
                 let mut file_status = job.file_status.lock().unwrap();
                 let next_file_state = next_state(&completed_file, &file_status);
-                println!("{completed_file} {:?}", next_file_state);
                 if next_file_state.is_none() {
                     let modified_job = job.clone();
                     job_q.push_front(modified_job);
