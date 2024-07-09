@@ -39,7 +39,7 @@ fn display_system_status(sys_stat: SystemStatus) {
     }
     // Ideally we want some health stats here like how many idle/busy workers out of n_workers
     println!("-----------------------------------");
-    println!("System health:\t{}%", (active_count/n_workers)*100);
+    println!("System health:\t{}%", (active_count as f32/n_workers as f32)*100 as f32);
     println!("Active Workers:\t{active_count} / {n_workers}");
     println!("Dead Workers:\t{dead_count} / {n_workers}");
     println!("-----------------------------------");
@@ -97,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::Status {} => {
             let response = client.system_status(Request::new(Empty {})).await?;
-            println!("System status: {:?}", response);
+            // println!("System status: {:?}", response);
             
             display_system_status(response.into_inner());
             // let system_status: SystemStatus = response.into_inner();

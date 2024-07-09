@@ -119,6 +119,7 @@ fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>,
             JobStatus::MapPhase => {
                 let elapsed = now() - this_file_status.elapsed;
                 if (elapsed) > timeout {
+                    println!("Gave a straggling task");
                     return Some(file.clone());
                 }
             }
@@ -128,6 +129,7 @@ fn get_next_file(files: &Vec<String>, file_status: &HashMap<String, FileStatus>,
             JobStatus::ReducePhase => {
                 let elapsed = now() - this_file_status.elapsed;
                 if (elapsed) > timeout {
+                    println!("Gave a straggling task");
                     return Some(file.clone());
                 }
             }
